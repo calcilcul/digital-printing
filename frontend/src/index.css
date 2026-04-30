@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+
+  /* Standard glassmorphism card */
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-card;
+  }
+
+  /* Standard glassmorphism card on hover */
+  .glass-card:hover {
+    @apply shadow-card-hover transition-shadow duration-300;
+  }
+
+  /* Glassmorphism navbar */
+  .glass-navbar {
+    @apply bg-white/80 backdrop-blur-lg border-b border-gray-200/50 shadow-sm;
+  }
+
+  /* Variables untuk dark mode ready (Optional for now) */
+  .glass-card-dark {
+    @apply bg-black/20 backdrop-blur-md border border-white/10;
+  }
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 font-sans antialiased;
+}
+
+::selection {
+  @apply bg-primary-500 text-white;
+}
