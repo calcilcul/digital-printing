@@ -1,0 +1,28 @@
+# ========================
+# Golang API
+# ========================
+golang-api/.env
+golang-api/uploads/
+
+# ========================
+# Mobile (Expo React Native)
+# ========================
+mobile/.env
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+
+# ========================
+# Web Frontend (referensi)
+# ========================
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# ========================
+# Umum
+# ========================
+.DS_Store
+Thumbs.db
+*.log
