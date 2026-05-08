@@ -22,11 +22,15 @@ export default function LoginScreen({ navigation }: any) {
       // Panggil API Golang (pastikan server menyala dan endpoint sesuai)
       const response = await api.post('/login', { email, password });
       
-      // Ambil token dari response
-      const token = response.data?.token || response.data?.access_token || response.data?.data?.token;
+      // Ambil token dan user dari response data (format: { status, message, data: { token, user } })
+      const { token, user } = response.data?.data || {};
       
       if (token) {
         await AsyncStorage.setItem('userToken', token);
+      }
+      
+      if (user) {
+        await AsyncStorage.setItem('user', JSON.stringify(user));
       }
       
       // Navigate to Home screen

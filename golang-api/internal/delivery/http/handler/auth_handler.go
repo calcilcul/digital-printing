@@ -55,7 +55,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
 
-	token, err := h.authUsecase.Login(c.Request.Context(), req.Email, req.Password, ip, ua)
+	token, userData, err := h.authUsecase.Login(c.Request.Context(), req.Email, req.Password, ip, ua)
 	if err != nil {
 		response.ErrorResponse(c, http.StatusUnauthorized, err.Error())
 		return
@@ -63,6 +63,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	response.SuccessResponse(c, "Login berhasil", gin.H{
 		"token": token,
+		"user":  userData,
 	})
 }
 

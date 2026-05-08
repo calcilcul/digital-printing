@@ -17,6 +17,7 @@ const DUMMY_PRODUCTS = [
 export default function HomeScreen({ navigation }: any) {
   const [products, setProducts] = useState<any[]>([]);
   const [cartCount, setCartCount] = useState(0);
+  const [userData, setUserData] = useState<any>(null);
   const { width } = useWindowDimensions();
 
   // Menentukan lebar kartu secara dinamis (Responsif)
@@ -32,7 +33,19 @@ export default function HomeScreen({ navigation }: any) {
   useEffect(() => {
     fetchProducts();
     fetchCartCount();
+    loadUserData();
   }, []);
+
+  const loadUserData = async () => {
+    try {
+      const userStr = await AsyncStorage.getItem('user');
+      if (userStr) {
+        setUserData(JSON.parse(userStr));
+      }
+    } catch (error) {
+      console.error('Load user data error:', error);
+    }
+  };
 
   const fetchProducts = async () => {
     try {
@@ -95,7 +108,12 @@ export default function HomeScreen({ navigation }: any) {
     <SafeAreaView style={styles.container}>
       <View style={styles.storeWrapper}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Digital Printing</Text>
+          <View>
+            <Text style={styles.headerTitle}>Digital Printing</Text>
+            {userData?.formatted_id && (
+              <Text style={styles.userIdText}>ID: {userData.formatted_id}</Text>
+            )}
+          </View>
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.cartContainer} onPress={() => navigation.navigate('Cart')}>
               <Text style={styles.cartIcon}>🛒</Text>
@@ -144,6 +162,7 @@ const styles = StyleSheet.create({
   storeWrapper: { flex: 1, width: '100%', maxWidth: 800, alignSelf: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#000000' },
+  userIdText: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   cartContainer: { position: 'relative', marginRight: 16, padding: 4 },
   cartIcon: { fontSize: 24 },
