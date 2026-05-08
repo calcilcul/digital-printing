@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"golang-api/internal/pkg/response"
 	"golang-api/internal/usecase"
 
 	"github.com/gin-gonic/gin"
@@ -45,10 +46,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Format data tidak valid",
-			"error":   err.Error(),
-		})
+		response.ErrorResponse(c, http.StatusBadRequest, "Format data tidak valid: " + err.Error())
 		return
 	}
 
@@ -59,15 +57,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	token, err := h.authUsecase.Login(c.Request.Context(), req.Email, req.Password, ip, ua)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"message": err.Error(),
-		})
+		response.ErrorResponse(c, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Login berhasil",
-		"token":   token,
+	response.SuccessResponse(c, "Login berhasil", gin.H{
+		"token": token,
 	})
 }
 
@@ -78,10 +73,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Format data tidak valid",
-			"error":   err.Error(),
-		})
+		response.ErrorResponse(c, http.StatusBadRequest, "Format data tidak valid: " + err.Error())
 		return
 	}
 
@@ -93,15 +85,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	err := h.authUsecase.Register(c.Request.Context(), req.Name, req.Email, req.Password, ip, ua)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": err.Error(),
-		})
+		response.ErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Registrasi berhasil",
-	})
+	response.SuccessResponse(c, "Registrasi berhasil", nil)
 }
 
 // =========================================================================
@@ -112,10 +100,7 @@ func (h *AuthHandler) RegisterStaff(c *gin.Context) {
 
 	// 1. Validasi JSON
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Format data staf tidak valid",
-			"error":   err.Error(),
-		})
+		response.ErrorResponse(c, http.StatusBadRequest, "Format data staf tidak valid: " + err.Error())
 		return
 	}
 
@@ -124,21 +109,20 @@ func (h *AuthHandler) RegisterStaff(c *gin.Context) {
 	ua := c.Request.UserAgent()
 
 	// 3. Ambil UserID si Owner dari JWT Middleware
-	// Ini penting untuk mencatat siapa yang mendaftarkan staf ini di Audit Log
-	ownerID := c.MustGet("user_id").(int)
-
-	// 4. Eksekusi Usecase
-	err := h.authUsecase.RegisterStaff(c.Request.Context(), req.Name, req.Email, req.Password, ip, ua, ownerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": err.Error(),
-		})
+	ownerID, exists := c.Get("user_id")
+	if !exists {
+		response.ErrorResponse(c, http.StatusUnauthorized, "Sesi tidak valid")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Staf baru berhasil didaftarkan oleh Owner",
-	})
+	// 4. Eksekusi Usecase
+	err := h.authUsecase.RegisterStaff(c.Request.Context(), req.Name, req.Email, req.Password, ip, ua, ownerID.(int))
+	if err != nil {
+		response.ErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.CreatedResponse(c, "Staf baru berhasil didaftarkan oleh Owner", nil)
 }
 
 // =========================================================================
@@ -148,7 +132,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// Ambil ID user dari JWT middleware
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		response.ErrorResponse(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -159,7 +143,5 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	_ = h.authUsecase.Logout(c.Request.Context(), userID.(int), ip, ua)
 
 	// Beri tahu client untuk menghapus token
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Logout berhasil. Silakan hapus token di aplikasi Anda.",
-	})
+	response.SuccessResponse(c, "Logout berhasil. Silakan hapus token di aplikasi Anda.", nil)
 }
