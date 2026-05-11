@@ -27,8 +27,9 @@ export const useAuthStore = create(
           
           const userData = {
             id: resProfile.data.user_id,
-            email: email,
-            role: resProfile.data.role
+            email: resProfile.data.email || email,
+            role: resProfile.data.role,
+            name: resProfile.data.name || 'User'
           };
 
           set({

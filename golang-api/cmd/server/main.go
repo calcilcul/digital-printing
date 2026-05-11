@@ -10,9 +10,13 @@ import (
 
 	"golang-api/internal/delivery/http/handler"
 	"golang-api/internal/delivery/http/routes"
+	"golang-api/internal/delivery/websocket"
+	"golang-api/internal/delivery/http/middleware"
 	"golang-api/internal/infrastructure/database"
 	postgresRepo "golang-api/internal/repository/postgres"
 	"golang-api/internal/usecase"
+	"time"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -56,16 +60,23 @@ func main() {
 	reportRepo := postgresRepo.NewReportRepository(dbConn)
 
 	// =========================================================================
-	// 4. USECASE INITIALIZATION (Dependency Injection)
+	// 4. WEBSOCKET & RATE LIMITER INITIALIZATION
+	// =========================================================================
+	wsHub := websocket.NewHub()
+	go wsHub.Run()
+	limiter := middleware.NewIPRateLimiter(rate.Every(time.Second), 100)
+
+	// =========================================================================
+	// 5. USECASE INITIALIZATION (Dependency Injection)
 	// =========================================================================
 	authUsecase := usecase.NewAuthUsecase(userRepo, auditRepo)
 	productUsecase := usecase.NewProductUsecase(productRepo)
-	orderUsecase := usecase.NewOrderUsecase(orderRepo, auditRepo)
+	orderUsecase := usecase.NewOrderUsecase(orderRepo, auditRepo, wsHub)
 	cartUsecase := usecase.NewCartUsecase(cartRepo)
-	paymentUsecase := usecase.NewPaymentUsecase(paymentRepo, orderRepo, auditRepo)
+	paymentUsecase := usecase.NewPaymentUsecase(paymentRepo, orderRepo, auditRepo, wsHub)
 
 	// 🔥 TAMBAHAN: Inisialisasi Production, Material & Design Usecase
-	productionUsecase := usecase.NewProductionUsecase(productionRepo, auditRepo)
+	productionUsecase := usecase.NewProductionUsecase(productionRepo, auditRepo, wsHub)
 	materialUsecase := usecase.NewMaterialUsecase(materialRepo, auditRepo)
 	designUsecase := usecase.NewDesignUsecase(designRepo, auditRepo)
 	reportUsecase := usecase.NewReportUsecase(reportRepo)
@@ -87,20 +98,22 @@ func main() {
 	reportHandler := handler.NewReportHandler(reportUsecase)
 	userHandler := handler.NewUserHandler(userUsecase)
 
-	// =========================================================================
-	// 6. ROUTER & SERVER SETUP
+	// 7. ROUTER & SERVER SETUP
 	// =========================================================================
 	r := gin.Default()
+
+	// Batas memori untuk file upload (desain digital printing yang ukurannya bisa besar)
+	r.MaxMultipartMemory = 10 << 20 // 10 MiB (Disetel ke 10MB sesuai revisi)
 
 	// ========================
 	// CORS CONFIGURATION
 	// ========================
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:   []string{"Content-Length"},
+		MaxAge:          12 * time.Hour,
 	}))
 
 	// Keamanan Proxy
@@ -116,12 +129,14 @@ func main() {
 		orderHandler,
 		cartHandler,
 		paymentHandler,
-		productionHandler, // 🔥 DIMASUKKAN KE PARAMETER SETUP ROUTES
-		materialHandler,   // 🔥 DIMASUKKAN KE PARAMETER SETUP ROUTES
-		designHandler,     // 🔥 DIMASUKKAN KE PARAMETER SETUP ROUTES
-		reportHandler,     // 🔥 DIMASUKKAN KE PARAMETER SETUP ROUTES
-		userHandler,       // 🔥 TAMBAHAN UNTUK USER MANAGEMENT
-		userRepo,          // 🔥 TAMBAHAN UNTUK MIDDLEWARE
+		productionHandler,
+		materialHandler,
+		designHandler,
+		reportHandler,
+		userHandler,
+		userRepo,
+		wsHub,
+		limiter,
 	)
 
 	// RUN SERVER

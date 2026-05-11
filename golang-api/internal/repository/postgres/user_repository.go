@@ -24,7 +24,7 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*user.U
 	var u user.User
 
 	query := `
-		SELECT id, role_id, name, email, password, COALESCE(phone, ''), COALESCE(is_active, true)
+		SELECT id, role_id, name, email, password
 		FROM public.users
 		WHERE email = $1
 		LIMIT 1
@@ -37,8 +37,6 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*user.U
 		&u.Name,
 		&u.Email,
 		&u.Password,
-		&u.Phone,
-		&u.IsActive,
 	)
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -84,9 +82,9 @@ func (r *userRepository) Create(ctx context.Context, u *user.User) error {
 // =========================================================================
 func (r *userRepository) FindByID(ctx context.Context, id int) (*user.User, error) {
 	var u user.User
-	query := `SELECT id, name, email, role_id, COALESCE(phone, ''), COALESCE(is_active, true) FROM public.users WHERE id = $1`
+	query := `SELECT id, name, email, role_id FROM public.users WHERE id = $1`
 
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&u.ID, &u.Name, &u.Email, &u.RoleID, &u.Phone, &u.IsActive)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&u.ID, &u.Name, &u.Email, &u.RoleID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -123,7 +121,7 @@ func (r *userRepository) UpdateProfile(ctx context.Context, id int, name, phone 
 // =========================================================================
 func (r *userRepository) GetAllUsers(ctx context.Context, roleID *int) ([]user.User, error) {
 	query := `
-		SELECT id, name, email, role_id, COALESCE(phone, ''), COALESCE(is_active, true), created_at
+		SELECT id, name, email, role_id, created_at
 		FROM public.users
 	`
 	var args []interface{}
@@ -142,7 +140,7 @@ func (r *userRepository) GetAllUsers(ctx context.Context, roleID *int) ([]user.U
 	var users []user.User
 	for rows.Next() {
 		var u user.User
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.RoleID, &u.Phone, &u.IsActive, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.RoleID, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

@@ -7,23 +7,28 @@ import (
 	"golang-api/internal/domain/audit"
 	"golang-api/internal/domain/order"
 	"golang-api/internal/domain/payment"
+	"golang-api/internal/delivery/websocket"
+	"fmt"
 )
 
 type PaymentUsecase struct {
 	repo      payment.Repository
 	orderRepo order.Repository
 	auditRepo audit.Repository
+	wsHub     *websocket.Hub
 }
 
 func NewPaymentUsecase(
 	repo payment.Repository,
 	orderRepo order.Repository,
 	auditRepo audit.Repository,
+	wsHub *websocket.Hub,
 ) *PaymentUsecase {
 	return &PaymentUsecase{
 		repo:      repo,
 		orderRepo: orderRepo,
 		auditRepo: auditRepo,
+		wsHub:     wsHub,
 	}
 }
 
@@ -97,6 +102,9 @@ func (u *PaymentUsecase) UploadProof(
 		IPAddress: ip,
 		UserAgent: ua,
 	})
+
+	// Kirim Notifikasi WebSocket ke Staff/Manager
+	u.wsHub.BroadcastNotification(fmt.Sprintf("💰 Pembayaran Baru untuk Pesanan #%d", orderID))
 
 	return p.ID, nil
 }

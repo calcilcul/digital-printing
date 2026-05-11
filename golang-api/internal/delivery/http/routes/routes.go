@@ -3,6 +3,7 @@ package routes
 import (
 	"golang-api/internal/delivery/http/handler"
 	"golang-api/internal/delivery/http/middleware"
+	"golang-api/internal/delivery/websocket"
 	"golang-api/internal/domain/user"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,8 @@ func SetupRoutes(
 	reportHandler *handler.ReportHandler,
 	userHandler *handler.UserHandler,
 	userRepo user.Repository,
+	wsHub *websocket.Hub,
+	limiter *middleware.IPRateLimiter,
 ) {
 
 	// ========================
@@ -31,15 +34,22 @@ func SetupRoutes(
 	})
 
 	// ========================
-	// STATIC FILES (UPLOADS)
+	// STATIC FILES & WEBSOCKET
 	// ========================
 	r.Static("/uploads", "./uploads")
+	r.GET("/ws", func(c *gin.Context) {
+		wsHub.ServeWs(c.Writer, c.Request)
+	})
 
 	// ========================
-	// AUTH (PUBLIC)
+	// AUTH (PUBLIC with Rate Limit)
 	// ========================
-	r.POST("/login", authHandler.Login)
-	r.POST("/register", authHandler.Register)
+	authGroup := r.Group("/")
+	authGroup.Use(middleware.RateLimitMiddleware(limiter))
+	{
+		authGroup.POST("/login", authHandler.Login)
+		authGroup.POST("/register", authHandler.Register)
+	}
 
 	// ========================
 	// PUBLIC ROUTES
@@ -58,12 +68,26 @@ func SetupRoutes(
 		// ========================
 		api.GET("/profile", func(c *gin.Context) {
 			userID, _ := c.Get("user_id")
-			role, _ := c.Get("role")
+			
+			// Ambil data user lengkap dari DB untuk mendapatkan Nama
+			userData, err := userRepo.FindByID(c.Request.Context(), userID.(int))
+			if err != nil || userData == nil {
+				c.JSON(200, gin.H{
+					"message": "success",
+					"user_id": userID,
+					"role":    c.MustGet("role"),
+					"name":    "User",
+				})
+				return
+			}
 
 			c.JSON(200, gin.H{
 				"message": "success",
-				"user_id": userID,
-				"role":    role,
+				"user_id": userData.ID,
+				"role":    c.MustGet("role"),
+				"name":    userData.Name,
+				"email":   userData.Email,
+				"phone":   userData.Phone,
 			})
 		})
 		api.PUT("/profile", userHandler.UpdateProfile) // 🔥 Update profil (Nama & No HP)
@@ -85,6 +109,7 @@ func SetupRoutes(
 		api.POST("/orders", orderHandler.Create)
 		api.GET("/orders", orderHandler.GetMyOrders) // 🔥 FIX #4: Customer lihat pesanannya
 		api.GET("/orders/:id", orderHandler.GetOrderDetail) // 🔥 Invoice / Detail Pesanan
+		api.GET("/orders/:id/invoice/pdf", orderHandler.DownloadInvoicePDF) // 🔥 Generator Invoice PDF
 		api.POST("/checkout", orderHandler.Checkout)
 		api.PUT("/orders/:id/cancel", orderHandler.Cancel)
 		api.PUT("/orders/:id/complete", orderHandler.CompleteOrder) // 🔥 Customer konfirmasi selesai

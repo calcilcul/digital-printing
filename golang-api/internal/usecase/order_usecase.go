@@ -8,17 +8,20 @@ import (
 
 	"golang-api/internal/domain/audit"
 	"golang-api/internal/domain/order"
+	"golang-api/internal/delivery/websocket"
 )
 
 type OrderUsecase struct {
 	repo      order.Repository
 	auditRepo audit.Repository
+	wsHub     *websocket.Hub
 }
 
-func NewOrderUsecase(repo order.Repository, auditRepo audit.Repository) *OrderUsecase {
+func NewOrderUsecase(repo order.Repository, auditRepo audit.Repository, wsHub *websocket.Hub) *OrderUsecase {
 	return &OrderUsecase{
 		repo:      repo,
 		auditRepo: auditRepo,
+		wsHub:     wsHub,
 	}
 }
 
@@ -53,6 +56,9 @@ func (u *OrderUsecase) Create(ctx context.Context, userID int, items []order.Ord
 		UserAgent: ua,
 	})
 
+	// Kirim Notifikasi WebSocket ke Staff/Manager
+	u.wsHub.BroadcastNotification(fmt.Sprintf("🔔 Pesanan Baru: %s", orderCode))
+
 	return nil
 }
 
@@ -76,6 +82,9 @@ func (u *OrderUsecase) Checkout(ctx context.Context, userID int, ip, ua string) 
 		IPAddress: ip,
 		UserAgent: ua,
 	})
+
+	// Kirim Notifikasi WebSocket ke Staff/Manager
+	u.wsHub.BroadcastNotification(fmt.Sprintf("🔔 Pesanan Baru (Checkout): %s", orderCode))
 
 	return orderID, orderCode, total, nil
 }

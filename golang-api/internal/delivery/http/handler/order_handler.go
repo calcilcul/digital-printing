@@ -6,8 +6,10 @@ import (
 
 	"golang-api/internal/domain/order"
 	"golang-api/internal/usecase"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-pdf/fpdf"
 )
 
 type OrderHandler struct {
@@ -217,3 +219,73 @@ func (h *OrderHandler) CompleteOrder(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Pesanan berhasil diselesaikan. Terima kasih!"})
 }
+
+// =========================================================================
+// DOWNLOAD INVOICE PDF
+// =========================================================================
+func (h *OrderHandler) DownloadInvoicePDF(c *gin.Context) {
+	orderIDStr := c.Param("id")
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+
+	userID := c.MustGet("user_id").(int)
+	role := c.MustGet("role").(string)
+
+	detail, err := h.usecase.GetOrderDetail(c.Request.Context(), orderID, userID, role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	// Generate PDF
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+
+	// Header
+	pdf.SetFont("Arial", "B", 20)
+	pdf.Cell(0, 10, "INVOICE JAYA MANDIRI")
+	pdf.Ln(12)
+
+	pdf.SetFont("Arial", "", 12)
+	pdf.Cell(0, 10, fmt.Sprintf("Order Code: %s", detail.OrderCode))
+	pdf.Ln(8)
+	pdf.Cell(0, 10, fmt.Sprintf("Status: %s", detail.Status))
+	pdf.Ln(8)
+	pdf.Cell(0, 10, fmt.Sprintf("Tanggal: %s", detail.CreatedAt.Format("02 Jan 2006 15:04")))
+	pdf.Ln(15)
+
+	// Table Header
+	pdf.SetFont("Arial", "B", 12)
+	pdf.CellFormat(80, 10, "Produk", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(30, 10, "Harga", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(20, 10, "Qty", "1", 0, "C", false, 0, "")
+	pdf.CellFormat(40, 10, "Subtotal", "1", 0, "C", false, 0, "")
+	pdf.Ln(10)
+
+	// Table Content
+	pdf.SetFont("Arial", "", 12)
+	for _, item := range detail.Items {
+		pdf.CellFormat(80, 10, item.ProductName, "1", 0, "", false, 0, "")
+		pdf.CellFormat(30, 10, fmt.Sprintf("%.0f", item.Price), "1", 0, "R", false, 0, "")
+		pdf.CellFormat(20, 10, fmt.Sprintf("%d", item.Quantity), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(40, 10, fmt.Sprintf("%.0f", item.SubTotal), "1", 0, "R", false, 0, "")
+		pdf.Ln(10)
+	}
+
+	// Total
+	pdf.SetFont("Arial", "B", 12)
+	pdf.CellFormat(130, 10, "TOTAL", "1", 0, "R", false, 0, "")
+	pdf.CellFormat(40, 10, fmt.Sprintf("%.0f", detail.TotalPrice), "1", 0, "R", false, 0, "")
+
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=invoice_%s.pdf", detail.OrderCode))
+
+	err = pdf.Output(c.Writer)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal generate PDF"})
+	}
+}
+

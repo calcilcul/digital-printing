@@ -5,17 +5,21 @@ import (
 
 	"golang-api/internal/domain/audit"
 	"golang-api/internal/domain/production"
+	"golang-api/internal/delivery/websocket"
+	"fmt"
 )
 
 type ProductionUsecase struct {
 	repo      production.Repository
 	auditRepo audit.Repository
+	wsHub     *websocket.Hub
 }
 
-func NewProductionUsecase(repo production.Repository, auditRepo audit.Repository) *ProductionUsecase {
+func NewProductionUsecase(repo production.Repository, auditRepo audit.Repository, wsHub *websocket.Hub) *ProductionUsecase {
 	return &ProductionUsecase{
 		repo:      repo,
 		auditRepo: auditRepo,
+		wsHub:     wsHub,
 	}
 }
 
@@ -40,6 +44,9 @@ func (u *ProductionUsecase) StartProduction(ctx context.Context, orderID int, st
 		UserAgent: ua,
 	})
 
+	// Kirim Notifikasi WebSocket
+	u.wsHub.BroadcastNotification(fmt.Sprintf("🖨️ Pesanan #%d mulai diproduksi", orderID))
+
 	return nil
 }
 
@@ -63,6 +70,9 @@ func (u *ProductionUsecase) FinishProduction(ctx context.Context, orderID int, s
 		IPAddress: ip,
 		UserAgent: ua,
 	})
+
+	// Kirim Notifikasi WebSocket
+	u.wsHub.BroadcastNotification(fmt.Sprintf("✅ Pesanan #%d selesai diproduksi & siap diambil", orderID))
 
 	return nil
 }
