@@ -4,8 +4,9 @@ import "time"
 
 // User adalah Entity utama yang mencerminkan tabel users di database [cite: 1259 16483]
 type User struct {
-	ID        int        `json:"id"`
-	RoleID    int        `json:"role_id"`
+	ID          int        `json:"id"`
+	FormattedID string     `json:"formatted_id"`
+	RoleID      int        `json:"role_id"`
 	Name      string     `json:"name"`
 	Email     string     `json:"email"`
 	Password  string     `json:"-"` // " - " artinya password tidak akan dikirim saat diconvert ke JSON (keamanan) [cite: 1259 16483]
