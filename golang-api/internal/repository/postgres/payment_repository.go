@@ -79,6 +79,20 @@ func (r *paymentRepository) UpdateStatus(ctx context.Context, id int, status str
 		return err
 	}
 
+	// 2a. Insert ke tabel order_status_logs
+	notes := "Pembayaran disetujui, masuk ke antrean review desain"
+	if orderStatus == "waiting_payment" {
+		notes = "Pembayaran ditolak oleh staf, harap unggah ulang bukti transfer"
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, $2, $3, $4)`,
+		orderID, orderStatus, verifiedBy, notes)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	// 3. LOGIKA OTOMATIS POTONG STOK JIKA APPROVED (paid)
 	if orderStatus == "paid" {
 		// Ambil semua item pesanan dan cek material usagenya

@@ -40,38 +40,54 @@ export default function RegisterScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-[#0A0B0D]">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
-        <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 40 }}>
-          {/* Header */}
-          <TouchableOpacity onPress={() => navigation.goBack()} className="mb-8">
-            <Text className="text-gray-500 font-medium">← Kembali</Text>
-          </TouchableOpacity>
-
-          <View className="items-center mb-10">
-            <View className="w-20 h-20 bg-blue-600 rounded-2xl items-center justify-center mb-4 shadow-lg shadow-blue-500/50">
-              <Text className="text-white text-3xl font-bold">JM</Text>
-            </View>
-            <Text className="text-3xl font-extrabold text-gray-900 tracking-tight">Buat Akun</Text>
-            <Text className="text-base text-gray-500 mt-2 text-center">Daftar untuk mulai memesan</Text>
+        <ScrollView 
+          className="flex-1 px-6" 
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 40 }}
+        >
+          {/* Top Back/Close Button */}
+          <View className="absolute top-4 left-6 z-10">
+            <TouchableOpacity 
+              onPress={() => navigation.goBack()} 
+              className="w-10 h-10 rounded-full bg-[#18191D] items-center justify-center border border-[#2B2C31]"
+            >
+              <Text className="text-white text-lg font-light">←</Text>
+            </TouchableOpacity>
           </View>
 
+          {/* Logo & Headline */}
+          <View className="items-center mb-10 mt-8">
+            <View className="flex-row items-center mb-2">
+              <View className="w-8 h-8 bg-white rounded-lg items-center justify-center mr-2 shadow-md">
+                <Text className="text-[#0A0B0D] font-extrabold text-base">J</Text>
+              </View>
+              <Text className="text-white text-xl font-bold tracking-wider">JAYA MANDIRI</Text>
+            </View>
+            <Text className="text-white text-3xl font-bold mt-6 tracking-tight text-center">Create your account</Text>
+            <Text className="text-[#8E8E93] text-sm mt-2 text-center max-w-[280px]">
+              Daftar untuk mulai menikmati semua kemudahan cetak & advertising.
+            </Text>
+          </View>
+
+          {/* Input Fields */}
           <View className="space-y-4">
             <View>
-              <Text className="text-sm font-semibold text-gray-700 mb-1 ml-1">Nama Lengkap</Text>
               <TextInput
-                className="w-full bg-gray-50 px-4 py-4 rounded-xl border border-gray-200 text-gray-900 text-base"
-                placeholder="Nama Anda"
+                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
+                placeholder="Nama Lengkap"
+                placeholderTextColor="#636469"
                 value={name}
                 onChangeText={setName}
               />
             </View>
 
-            <View className="mt-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-1 ml-1">Email</Text>
+            <View className="mt-3">
               <TextInput
-                className="w-full bg-gray-50 px-4 py-4 rounded-xl border border-gray-200 text-gray-900 text-base"
-                placeholder="nama@email.com"
+                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
+                placeholder="Alamat Email"
+                placeholderTextColor="#636469"
                 autoCapitalize="none"
                 keyboardType="email-address"
                 value={email}
@@ -79,44 +95,47 @@ export default function RegisterScreen() {
               />
             </View>
 
-            <View className="mt-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-1 ml-1">Password</Text>
+            <View className="mt-3">
               <TextInput
-                className="w-full bg-gray-50 px-4 py-4 rounded-xl border border-gray-200 text-gray-900 text-base"
-                placeholder="Minimal 6 karakter"
+                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
+                placeholder="Kata Sandi (Min. 6 karakter)"
+                placeholderTextColor="#636469"
                 secureTextEntry
                 value={password}
                 onChangeText={setPassword}
               />
             </View>
 
-            <View className="mt-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-1 ml-1">Konfirmasi Password</Text>
+            <View className="mt-3">
               <TextInput
-                className="w-full bg-gray-50 px-4 py-4 rounded-xl border border-gray-200 text-gray-900 text-base"
-                placeholder="Ulangi password"
+                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
+                placeholder="Konfirmasi Kata Sandi"
+                placeholderTextColor="#636469"
                 secureTextEntry
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
               />
             </View>
 
+            {/* Register Action Button */}
             <TouchableOpacity
-              className="w-full bg-blue-600 py-4 rounded-xl items-center mt-8 shadow-md shadow-blue-500/30 active:bg-blue-700"
+              className="w-full bg-white py-4.5 rounded-full items-center mt-6 active:opacity-90 shadow-lg shadow-white/10"
               onPress={handleRegister}
               disabled={loading}
+              style={{ height: 56, justifyContent: 'center' }}
             >
               {loading ? (
-                <ActivityIndicator color="#ffffff" />
+                <ActivityIndicator color="#000000" />
               ) : (
-                <Text className="text-white font-bold text-lg tracking-wide">DAFTAR</Text>
+                <Text className="text-[#0A0B0D] font-bold text-base tracking-wide">Next</Text>
               )}
             </TouchableOpacity>
 
-            <View className="flex-row justify-center mt-6">
-              <Text className="text-gray-500">Sudah punya akun? </Text>
+            {/* Back to Login CTA */}
+            <View className="flex-row justify-center mt-8">
+              <Text className="text-[#636469] text-sm">Sudah punya akun? </Text>
               <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                <Text className="text-blue-600 font-bold">Login di sini</Text>
+                <Text className="text-white font-bold text-sm underline">Login</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -125,3 +144,4 @@ export default function RegisterScreen() {
     </SafeAreaView>
   );
 }
+

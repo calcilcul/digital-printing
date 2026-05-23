@@ -3,21 +3,60 @@ import { axiosClient } from '../api/axiosClient';
 
 export interface OrderItem {
   id: number;
+  order_id?: number;
   product_id: number;
   product_name: string;
   variant_name: string;
   quantity: number;
   price: number;
-  subtotal: number;
+  sub_total?: number;
+  subtotal?: number;
+  notes?: string;
+  design_file_id?: number;
+  design_file_path?: string;
+  design_version?: number;
+  design_status?: string;
+  design_notes?: string;
+}
+
+export interface OrderStatusLog {
+  id: number;
+  order_id: number;
+  status: string;
+  changed_by: number;
+  changed_name: string;
+  notes: string;
+  created_at: string;
 }
 
 export interface Order {
   id: number;
-  invoice_number: string;
-  total_amount: number;
+  user_id?: number;
+  order_code: string;
+  total_price: number;
+  total_amount?: number;
   status: string;
   created_at: string;
+  updated_at?: string;
+  estimated_finish_date?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
   items?: OrderItem[];
+  payment?: {
+    transaction_code: string;
+    payment_method: string;
+    amount: number;
+    payment_status: string;
+    payment_proof?: string;
+    verified_at?: string;
+  };
+  payment_proof_url?: string;
+  payment_id?: number;
+  status_logs?: OrderStatusLog[];
+  revision_count?: number;
+  revision_notes?: string;
+  payment_rejected_reason?: string;
 }
 
 interface OrderState {

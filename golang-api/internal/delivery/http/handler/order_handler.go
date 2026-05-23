@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"fmt"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"golang-api/internal/domain/order"
 	"golang-api/internal/usecase"
-	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-pdf/fpdf"
@@ -288,4 +292,311 @@ func (h *OrderHandler) DownloadInvoicePDF(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal generate PDF"})
 	}
 }
+
+// =========================================================================
+// BUY NOW (Customer - beli langsung 1 item)
+// =========================================================================
+type BuyNowRequest struct {
+	ProductID int    `json:"product_id" binding:"required"`
+	VariantID int    `json:"variant_id" binding:"required"`
+	Quantity  int    `json:"quantity" binding:"required,min=1"`
+	Notes     string `json:"notes"`
+}
+
+func (h *OrderHandler) BuyNow(c *gin.Context) {
+	userID := c.MustGet("user_id").(int)
+	var req BuyNowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Format request tidak valid: " + err.Error()})
+		return
+	}
+	orderID, orderCode, total, err := h.usecase.BuyNow(c.Request.Context(), userID, req.ProductID, req.VariantID, req.Quantity, req.Notes)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"message":     "Pesanan berhasil dibuat, silakan upload desain",
+		"order_id":    orderID,
+		"order_code":  orderCode,
+		"total_price": total,
+	})
+}
+
+// =========================================================================
+// UPLOAD DESIGN PER ITEM (Customer - multipart/form-data)
+// =========================================================================
+func (h *OrderHandler) UploadDesign(c *gin.Context) {
+	userID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	orderItemID, err := strconv.Atoi(c.Param("item_id"))
+	if err != nil || orderItemID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID item tidak valid"})
+		return
+	}
+
+	file, fileHeader, err := c.Request.FormFile("design_file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "File desain tidak ditemukan di request"})
+		return
+	}
+	defer file.Close()
+
+	// Simpan file
+	filePath, err := saveUploadedFile(c, fileHeader, "designs")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file: " + err.Error()})
+		return
+	}
+
+	if err := h.usecase.UploadDesign(c.Request.Context(), orderID, orderItemID, filePath, userID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Desain berhasil diupload", "file_path": filePath})
+}
+
+// =========================================================================
+// REUPLOAD DESIGN (Customer - setelah revisi)
+// =========================================================================
+func (h *OrderHandler) ReuploadDesign(c *gin.Context) {
+	userID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	orderItemID, err := strconv.Atoi(c.Param("item_id"))
+	if err != nil || orderItemID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID item tidak valid"})
+		return
+	}
+
+	file, fileHeader, err := c.Request.FormFile("design_file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "File desain tidak ditemukan di request"})
+		return
+	}
+	defer file.Close()
+
+	filePath, err := saveUploadedFile(c, fileHeader, "designs")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file: " + err.Error()})
+		return
+	}
+
+	if err := h.usecase.ReuploadDesign(c.Request.Context(), orderID, orderItemID, filePath, userID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Desain berhasil diupload ulang", "file_path": filePath})
+}
+
+// =========================================================================
+// UPLOAD PAYMENT (Customer - bukti transfer)
+// =========================================================================
+func (h *OrderHandler) UploadPayment(c *gin.Context) {
+	userID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+
+	file, fileHeader, err := c.Request.FormFile("payment_proof")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "File bukti bayar tidak ditemukan di request"})
+		return
+	}
+	defer file.Close()
+
+	// Parse amount dari form data
+	amountStr := c.PostForm("amount")
+	var amount float64
+	if amountStr != "" {
+		if _, err := fmt.Sscanf(amountStr, "%f", &amount); err != nil {
+			amount = 0
+		}
+	}
+
+	filePath, err := saveUploadedFile(c, fileHeader, "payments")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file: " + err.Error()})
+		return
+	}
+
+	if err := h.usecase.UploadPayment(c.Request.Context(), orderID, userID, filePath, amount); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Bukti pembayaran berhasil diupload, menunggu verifikasi staf"})
+}
+
+// =========================================================================
+// REUPLOAD PAYMENT (Customer - setelah ditolak)
+// =========================================================================
+func (h *OrderHandler) ReuploadPayment(c *gin.Context) {
+	userID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+
+	file, fileHeader, err := c.Request.FormFile("payment_proof")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "File bukti bayar tidak ditemukan di request"})
+		return
+	}
+	defer file.Close()
+
+	filePath, err := saveUploadedFile(c, fileHeader, "payments")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file: " + err.Error()})
+		return
+	}
+
+	if err := h.usecase.ReuploadPayment(c.Request.Context(), orderID, userID, filePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Bukti pembayaran berhasil diupload ulang"})
+}
+
+// =========================================================================
+// STAFF: APPROVE PAYMENT
+// =========================================================================
+func (h *OrderHandler) ApprovePayment(c *gin.Context) {
+	staffID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	if err := h.usecase.ApprovePayment(c.Request.Context(), orderID, staffID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Pembayaran berhasil diverifikasi"})
+}
+
+// =========================================================================
+// STAFF: REJECT PAYMENT
+// =========================================================================
+type RejectPaymentRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+func (h *OrderHandler) RejectPayment(c *gin.Context) {
+	staffID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	var req RejectPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Alasan penolakan harus diisi"})
+		return
+	}
+	if err := h.usecase.RejectPayment(c.Request.Context(), orderID, staffID, req.Reason); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Pembayaran ditolak, customer akan diminta upload ulang"})
+}
+
+// =========================================================================
+// STAFF: APPROVE DESIGN
+// =========================================================================
+func (h *OrderHandler) ApproveDesign(c *gin.Context) {
+	staffID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	if err := h.usecase.ApproveDesign(c.Request.Context(), orderID, staffID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Desain disetujui, pesanan masuk antrian cetak"})
+}
+
+// =========================================================================
+// STAFF: REQUEST REVISION
+// =========================================================================
+type RequestRevisionRequest struct {
+	Notes string `json:"notes" binding:"required"`
+}
+
+func (h *OrderHandler) RequestRevision(c *gin.Context) {
+	staffID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	var req RequestRevisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Catatan revisi harus diisi"})
+		return
+	}
+	if err := h.usecase.RequestRevision(c.Request.Context(), orderID, staffID, req.Notes); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Permintaan revisi berhasil dikirim ke customer"})
+}
+
+// =========================================================================
+// STAFF: FINISH PRINTING → ready
+// =========================================================================
+func (h *OrderHandler) FinishPrinting(c *gin.Context) {
+	staffID := c.MustGet("user_id").(int)
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ID pesanan tidak valid"})
+		return
+	}
+	if err := h.usecase.FinishPrinting(c.Request.Context(), orderID, staffID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Cetak selesai, pesanan siap diambil customer"})
+}
+
+// =========================================================================
+// HELPER: Save uploaded file to disk
+// =========================================================================
+var allowedUploadExtensions = map[string]bool{
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+	".pdf":  true,
+	".ai":   true,
+	".psd":  true,
+	".cdr":  true,
+}
+
+func saveUploadedFile(c *gin.Context, fileHeader *multipart.FileHeader, subfolder string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	if !allowedUploadExtensions[ext] {
+		return "", fmt.Errorf("tipe file '%s' tidak diizinkan", ext)
+	}
+	if fileHeader.Size > 10*1024*1024 {
+		return "", fmt.Errorf("ukuran file terlalu besar, maksimal 10MB")
+	}
+	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), filepath.Base(fileHeader.Filename))
+	savePath := filepath.Join("uploads", subfolder, filename)
+	if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {
+		return "", err
+	}
+	return "/uploads/" + subfolder + "/" + filename, nil
+}
+
 

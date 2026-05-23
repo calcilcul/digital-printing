@@ -107,21 +107,25 @@ func SetupRoutes(
 		// ORDER & DESIGNS
 		// ========================
 		api.POST("/orders", orderHandler.Create)
-		api.GET("/orders", orderHandler.GetMyOrders) // 🔥 FIX #4: Customer lihat pesanannya
-		api.GET("/orders/:id", orderHandler.GetOrderDetail) // 🔥 Invoice / Detail Pesanan
-		api.GET("/orders/:id/invoice/pdf", orderHandler.DownloadInvoicePDF) // 🔥 Generator Invoice PDF
-		api.POST("/checkout", orderHandler.Checkout)
+		api.GET("/orders", orderHandler.GetMyOrders)
+		api.GET("/orders/:id", orderHandler.GetOrderDetail)
+		api.GET("/orders/:id/invoice/pdf", orderHandler.DownloadInvoicePDF)
+		api.POST("/checkout", orderHandler.Checkout)            // checkout dari keranjang
+		api.POST("/buy-now", orderHandler.BuyNow)               // beli langsung 1 item
 		api.PUT("/orders/:id/cancel", orderHandler.Cancel)
-		api.PUT("/orders/:id/complete", orderHandler.CompleteOrder) // 🔥 Customer konfirmasi selesai
-		
-		// Customer Upload & View Designs
+		api.PUT("/orders/:id/complete", orderHandler.CompleteOrder)
+
+		// Upload & Reupload Desain per Item
+		api.POST("/orders/:id/items/:item_id/design", orderHandler.UploadDesign)
+		api.POST("/orders/:id/items/:item_id/design/reupload", orderHandler.ReuploadDesign)
+
+		// Legacy design handler (existing)
 		api.POST("/orders/items/:id/design", designHandler.UploadDesign)
 		api.GET("/orders/items/:id/designs", designHandler.GetDesignsByOrderItemID)
 
-		// ========================
-		// PAYMENT (CUSTOMER)
-		// ========================
-		api.POST("/payments", paymentHandler.Upload)
+		// Upload & Reupload Bukti Bayar
+		api.POST("/orders/:id/payment", orderHandler.UploadPayment)
+		api.POST("/orders/:id/payment/reupload", orderHandler.ReuploadPayment)
 
 		// ========================
 		// OWNER / ADMIN ROUTES
@@ -161,19 +165,27 @@ func SetupRoutes(
 		// STAFF ROUTES (PRODUCTION, DESIGN, & VERIFICATION)
 		// ========================
 		staff := api.Group("/staff")
-		staff.Use(middleware.StaffOnly()) // 🔥 FIX #5: RBAC — hanya staff/admin/owner
+		staff.Use(middleware.StaffOnly())
 		{
-			// 🔥 Payment Verification (Staff/Admin)
-			staff.PUT("/payments/:id/approve", paymentHandler.Approve)
-			staff.PUT("/payments/:id/reject", paymentHandler.Reject)
-
-			// 🔥 Order Monitoring (Staff/Admin)
+			// Order Monitoring (Staff/Admin)
 			staff.GET("/orders", orderHandler.GetAllOrders)
 
+			// Payment Verification (baru)
+			staff.PUT("/orders/:id/payment/approve", orderHandler.ApprovePayment)
+			staff.PUT("/orders/:id/payment/reject", orderHandler.RejectPayment)
+
+			// Design Review (baru)
+			staff.PUT("/orders/:id/design/approve", orderHandler.ApproveDesign)
+			staff.PUT("/orders/:id/design/revision", orderHandler.RequestRevision)
+
+			// Production
+			staff.PUT("/orders/:id/printing/finish", orderHandler.FinishPrinting)
 			staff.PUT("/production/:id/start", productionHandler.Start)
 			staff.PUT("/production/:id/finish", productionHandler.Finish)
 
-			// Staff Review Design
+			// Legacy
+			staff.PUT("/payments/:id/approve", paymentHandler.Approve)
+			staff.PUT("/payments/:id/reject", paymentHandler.Reject)
 			staff.POST("/designs/:id/review", designHandler.AddReview)
 		}
 	}

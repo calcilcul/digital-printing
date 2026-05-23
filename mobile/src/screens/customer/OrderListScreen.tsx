@@ -66,7 +66,7 @@ export default function OrderListScreen() {
               className="bg-white p-5 rounded-3xl mb-4 shadow-sm shadow-gray-200 border border-gray-100"
             >
               <View className="flex-row justify-between items-center mb-3">
-                <Text className="font-bold text-gray-900">{order.invoice_number}</Text>
+                <Text className="font-bold text-gray-900">{order.order_code}</Text>
                 <View className={`px-3 py-1 rounded-full border ${getStatusColor(order.status).split(' ')[0]} ${getStatusColor(order.status).split(' ')[2]}`}>
                   <Text className={`text-xs font-bold ${getStatusColor(order.status).split(' ')[1]}`}>
                     {getStatusText(order.status)}
@@ -78,7 +78,7 @@ export default function OrderListScreen() {
                 <View>
                   <Text className="text-gray-500 text-xs mb-1">Total Belanja</Text>
                   <Text className="text-blue-600 font-bold text-lg">
-                    Rp {order.total_amount.toLocaleString('id-ID')}
+                    Rp {order.total_price?.toLocaleString('id-ID') || 0}
                   </Text>
                 </View>
                 <View className="bg-gray-50 px-4 py-2 rounded-xl">

@@ -73,6 +73,64 @@ func (r *productionRepository) StartProduction(ctx context.Context, orderID int,
 		return err
 	}
 
+	// 3. Insert ke tabel order_status_logs
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'printing', $2, $3)`,
+		orderID, staffID, notes)
+	if err != nil {
+		return err
+	}
+
+	// 4. Stok material dikurangi (material_stock_logs type='out' dan updates stock di materials)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT pv.material_id, (pv.material_usage * oi.quantity) as usage_amount, o.order_code
+		FROM order_items oi
+		JOIN orders o ON o.id = oi.order_id
+		JOIN product_variants pv ON pv.id = oi.variant_id
+		WHERE oi.order_id = $1 AND pv.material_id IS NOT NULL
+	`, orderID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type MaterialDeduction struct {
+		MaterialID  int
+		UsageAmount float64
+		OrderCode   string
+	}
+
+	var deductions []MaterialDeduction
+	for rows.Next() {
+		var d MaterialDeduction
+		if err := rows.Scan(&d.MaterialID, &d.UsageAmount, &d.OrderCode); err != nil {
+			return err
+		}
+		deductions = append(deductions, d)
+	}
+
+	for _, d := range deductions {
+		// Update stock di tabel materials
+		_, err = tx.ExecContext(ctx, `
+			UPDATE materials 
+			SET stock = stock - $1 
+			WHERE id = $2`,
+			d.UsageAmount, d.MaterialID)
+		if err != nil {
+			return err
+		}
+
+		// Insert ke tabel material_stock_logs
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO material_stock_logs (material_id, change_type, quantity, reference)
+			VALUES ($1, 'out', $2, $3)`,
+			d.MaterialID, d.UsageAmount, "Production Start: "+d.OrderCode)
+		if err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -107,6 +165,15 @@ func (r *productionRepository) FinishProduction(ctx context.Context, orderID int
 		SET end_time = $1, notes = CONCAT(notes, ' | ', $2::text)
 		WHERE order_id = $3 AND end_time IS NULL`,
 		time.Now(), notes, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Insert ke tabel order_status_logs
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'ready', $2, $3)`,
+		orderID, staffID, notes)
 	if err != nil {
 		return err
 	}

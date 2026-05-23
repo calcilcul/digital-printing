@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"fmt"
 
 	"golang-api/internal/usecase"
 
@@ -32,32 +33,61 @@ type UploadPaymentRequest struct {
 // UPLOAD PAYMENT (CUSTOMER)
 // =========================================================================
 func (h *PaymentHandler) Upload(c *gin.Context) {
-	var req UploadPaymentRequest
+	// Parse manual dari form-data
+	orderIDStr := c.PostForm("order_id")
+	amountStr := c.PostForm("amount")
+	methodIDStr := c.DefaultPostForm("payment_method_id", "1") // Default 1 jika tidak dikirim
+	transactionCode := c.DefaultPostForm("transaction_code", "MANUAL-TRX")
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Data request tidak valid",
-			"error":   err.Error(),
-		})
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "order_id tidak valid"})
 		return
 	}
 
-	// Ambil data dari context (JWT Middleware)
-	userID := c.MustGet("user_id").(int)
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "amount tidak valid"})
+		return
+	}
 
-	// Tangkap metadata untuk Audit Log
+	methodID, _ := strconv.Atoi(methodIDStr)
+
+	file, err := c.FormFile("payment_proof")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "File payment_proof tidak ditemukan"})
+		return
+	}
+
+	// Validasi ukuran file (max 5MB)
+	if file.Size > 5*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Ukuran file terlalu besar, maksimal 5MB"})
+		return
+	}
+
+	// Buat nama file unik
+	filename := fmt.Sprintf("%d_%s", orderID, file.Filename)
+	savePath := "uploads/payments/" + filename
+	dbPath := "/uploads/payments/" + filename
+
+	// Simpan file
+	if err := c.SaveUploadedFile(file, savePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file"})
+		return
+	}
+
+	userID := c.MustGet("user_id").(int)
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
 
-	// PERBAIKAN: Masukkan req.TransactionCode ke dalam argumen [Penting!]
 	paymentID, err := h.usecase.UploadProof(
 		c.Request.Context(),
 		userID,
-		req.OrderID,
-		req.MethodID,
-		req.TransactionCode, // Parameter ini harus dikirim
-		req.Amount,
-		req.Proof,
+		orderID,
+		methodID,
+		transactionCode,
+		amount,
+		dbPath,
 		ip,
 		ua,
 	)

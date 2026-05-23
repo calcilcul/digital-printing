@@ -72,7 +72,7 @@ func (u *ProductionUsecase) FinishProduction(ctx context.Context, orderID int, s
 	})
 
 	// Kirim Notifikasi WebSocket
-	u.wsHub.BroadcastNotification(fmt.Sprintf("✅ Pesanan #%d selesai diproduksi & siap diambil", orderID))
+	u.wsHub.BroadcastNotification(fmt.Sprintf("Yuhuu! Pesanan #%d Anda sudah selesai dicetak dan siap diambil/dikirim.", orderID))
 
 	return nil
 }

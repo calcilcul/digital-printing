@@ -26,6 +26,7 @@ type Product struct {
 	BasePrice     float64          `json:"base_price"`     // numeric(12,2) di DB dipetakan ke float64 [cite: 1259 16548]
 	EstimatedDays int              `json:"estimated_days"` // Estimasi waktu produksi dalam hari [cite: 1259 16548]
 	IsActive      bool             `json:"is_active"`
+	ImageURL      string           `json:"image_url"`   // URL gambar produk dari Unsplash
 	Variants      []ProductVariant `json:"variants,omitempty"` // Relasi ke product_variants
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     *time.Time       `json:"updated_at,omitempty"`

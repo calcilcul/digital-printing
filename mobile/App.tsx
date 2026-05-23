@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Import Navigators & Screens
 import MainNavigator from './src/navigation/MainNavigator';
@@ -16,6 +17,8 @@ import PaymentScreen from './src/screens/customer/PaymentScreen';
 import ProductDetailScreen from './src/screens/customer/ProductDetailScreen';
 import OrderDetailScreen from './src/screens/customer/OrderDetailScreen';
 import UploadDesignScreen from './src/screens/customer/UploadDesignScreen';
+import UploadPaymentScreen from './src/screens/customer/UploadPaymentScreen';
+import SplashScreen from './src/screens/SplashScreen';
 import { useAuthStore } from './src/store/authStore';
 
 const Stack = createNativeStackNavigator();
@@ -29,53 +32,50 @@ export default function App() {
   }, [initializeAuth]);
 
   if (!initialized) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff' }}>
-        <ActivityIndicator size="large" color="#1d4ed8" />
-      </View>
-    );
+    // Basic fallback if initialize takes a split second
+    return null;
   }
 
-  const isAuthenticated = !!token;
-  
-  // Render navigator berdasarkan role
+  // Render navigator berdasarkan role (Guest default)
   const getRoleNavigator = () => {
-    if (!user) return MainNavigator;
+    if (!user || !token) return MainNavigator; // GUEST OR CUSTOMER
     
     const role = user.role?.toLowerCase() || '';
-    if (role === 'staff') {
-      return StaffNavigator;
-    } else if (role === 'owner' || role === 'manager') {
-      return ManagerNavigator;
-    }
+    if (role === 'staff') return StaffNavigator;
+    if (role === 'owner' || role === 'manager') return ManagerNavigator;
+    
     return MainNavigator; // Default Customer
   };
 
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <NavigationContainer>
-          <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-            {isAuthenticated ? (
-              <>
-                {/* Dynamically assign the main screen based on role */}
-                <Stack.Screen name="Main" component={getRoleNavigator()} />
-                
-                {/* Global Screens that anyone can access if needed, though mostly for Customer */}
-                <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-                <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
-                <Stack.Screen name="UploadDesign" component={UploadDesignScreen} />
-                <Stack.Screen name="Payment" component={PaymentScreen} />
-              </>
-            ) : (
-              <>
-                <Stack.Screen name="Login" component={LoginScreen} />
-                <Stack.Screen name="Register" component={RegisterScreen} />
-              </>
-            )}
-          </Stack.Navigator>
-        </NavigationContainer>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <NavigationContainer>
+            <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false, animation: 'fade' }}>
+              {/* Splash Screen */}
+              <Stack.Screen name="Splash" component={SplashScreen} />
+              
+              {/* Main App (Always accessible, role-based) */}
+              <Stack.Screen 
+                key={token && user ? `${user.role}_navigator` : 'guest_navigator'}
+                name="Main" 
+                component={getRoleNavigator()} 
+                options={{ animation: 'fade' }} 
+              />
+              <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="OrderDetail" component={OrderDetailScreen} options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="UploadDesign" component={UploadDesignScreen} options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="UploadPayment" component={UploadPaymentScreen} options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="Payment" component={PaymentScreen} options={{ animation: 'slide_from_bottom' }} />
+
+              {/* Auth Screens (Accessed via modal or stack) */}
+              <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="Register" component={RegisterScreen} options={{ animation: 'slide_from_right' }} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

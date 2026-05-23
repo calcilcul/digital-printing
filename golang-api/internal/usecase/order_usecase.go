@@ -106,9 +106,14 @@ func (u *OrderUsecase) Cancel(ctx context.Context, orderID int, userID int, ip, 
 		return errors.New("anda tidak memiliki akses untuk membatalkan pesanan ini")
 	}
 
-	// Validasi status
-	if o.Status != "waiting_payment" && o.Status != "payment_verification" {
-		return errors.New("pesanan tidak dapat dibatalkan karena sudah dalam proses")
+	// Validasi status — boleh cancel sebelum masuk cetak
+	cancellableStatuses := map[string]bool{
+		"pending_design": true, "design_uploaded": true,
+		"payment_verification": true, "payment_rejected": true,
+		"design_review": true, "revision_requested": true,
+	}
+	if !cancellableStatuses[o.Status] {
+		return errors.New("pesanan tidak dapat dibatalkan karena sudah dalam proses cetak")
 	}
 
 	if err := u.repo.Cancel(ctx, orderID, userID); err != nil {
@@ -193,3 +198,84 @@ func (u *OrderUsecase) CompleteOrder(ctx context.Context, orderID int, userID in
 
 	return nil
 }
+
+// =========================================================================
+// BUY NOW (beli langsung 1 item)
+// =========================================================================
+func (u *OrderUsecase) BuyNow(ctx context.Context, userID int, productID int, variantID int, quantity int, notes string) (int, string, float64, error) {
+	orderID, orderCode, total, err := u.repo.BuyNow(ctx, userID, productID, variantID, quantity, notes)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	u.wsHub.BroadcastNotification(fmt.Sprintf("🔔 Pesanan Baru (Beli Sekarang): %s", orderCode))
+	return orderID, orderCode, total, nil
+}
+
+// =========================================================================
+// UPLOAD DESIGN
+// =========================================================================
+func (u *OrderUsecase) UploadDesign(ctx context.Context, orderID int, orderItemID int, filePath string, userID int) error {
+	return u.repo.UploadDesign(ctx, orderID, orderItemID, filePath, userID)
+}
+
+// =========================================================================
+// REUPLOAD DESIGN (setelah revisi)
+// =========================================================================
+func (u *OrderUsecase) ReuploadDesign(ctx context.Context, orderID int, orderItemID int, filePath string, userID int) error {
+	return u.repo.ReuploadDesign(ctx, orderID, orderItemID, filePath, userID)
+}
+
+// =========================================================================
+// UPLOAD PAYMENT
+// =========================================================================
+func (u *OrderUsecase) UploadPayment(ctx context.Context, orderID int, userID int, filePath string, amount float64) error {
+	err := u.repo.UploadPayment(ctx, orderID, userID, filePath, amount)
+	if err != nil {
+		return err
+	}
+	u.wsHub.BroadcastNotification(fmt.Sprintf("💰 Bukti Bayar Baru untuk Order #%d", orderID))
+	return nil
+}
+
+// =========================================================================
+// REUPLOAD PAYMENT (setelah ditolak)
+// =========================================================================
+func (u *OrderUsecase) ReuploadPayment(ctx context.Context, orderID int, userID int, filePath string) error {
+	return u.repo.ReuploadPayment(ctx, orderID, userID, filePath)
+}
+
+// =========================================================================
+// STAFF: APPROVE PAYMENT
+// =========================================================================
+func (u *OrderUsecase) ApprovePayment(ctx context.Context, orderID int, staffID int) error {
+	return u.repo.ApprovePayment(ctx, orderID, staffID)
+}
+
+// =========================================================================
+// STAFF: REJECT PAYMENT
+// =========================================================================
+func (u *OrderUsecase) RejectPayment(ctx context.Context, orderID int, staffID int, reason string) error {
+	return u.repo.RejectPayment(ctx, orderID, staffID, reason)
+}
+
+// =========================================================================
+// STAFF: APPROVE DESIGN
+// =========================================================================
+func (u *OrderUsecase) ApproveDesign(ctx context.Context, orderID int, staffID int) error {
+	return u.repo.ApproveDesign(ctx, orderID, staffID)
+}
+
+// =========================================================================
+// STAFF: REQUEST REVISION
+// =========================================================================
+func (u *OrderUsecase) RequestRevision(ctx context.Context, orderID int, staffID int, notes string) error {
+	return u.repo.RequestRevision(ctx, orderID, staffID, notes)
+}
+
+// =========================================================================
+// STAFF: FINISH PRINTING
+// =========================================================================
+func (u *OrderUsecase) FinishPrinting(ctx context.Context, orderID int, staffID int) error {
+	return u.repo.FinishPrinting(ctx, orderID, staffID)
+}
+

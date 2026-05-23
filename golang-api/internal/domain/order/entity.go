@@ -2,30 +2,40 @@ package order
 
 import "time"
 
-// Order mencerminkan struktur tabel orders di PostgreSQL [cite: 1259 16666]
+// Order mencerminkan struktur tabel orders di PostgreSQL
 type Order struct {
-	ID                  int        `json:"id"`
-	UserID              int        `json:"user_id"`
-	OrderCode           string     `json:"order_code"`            // Contoh: "ORD-2026-0001" [cite: 1259 16666]
-	TotalPrice          float64    `json:"total_price"`           // Sesuai numeric(12,2) [cite: 1259 16666]
-	Status              string     `json:"status"`                // ENUM: waiting_payment, production, dll [cite: 1247 1247]
-	EstimatedFinishDate *time.Time  `json:"estimated_finish_date"` // Bisa NULL jika belum diproses [cite: 1259 16666]
-	CreatedAt           time.Time   `json:"created_at"`            // Default CURRENT_TIMESTAMP [cite: 1259 16666]
-	UpdatedAt           *time.Time  `json:"updated_at,omitempty"`  // Pointer karena bisa NULL [cite: 1259 16666]
-	Items               []OrderItem `json:"items,omitempty"`       // Relasi ke order_items
+	ID                    int        `json:"id"`
+	UserID                int        `json:"user_id"`
+	OrderCode             string     `json:"order_code"`
+	TotalPrice            float64    `json:"total_price"`
+	Status                string     `json:"status"`
+	EstimatedFinishDate   *time.Time `json:"estimated_finish_date"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             *time.Time `json:"updated_at,omitempty"`
+	Items                 []OrderItem `json:"items,omitempty"`
+	PaymentID             int        `json:"payment_id"`
+	PaymentProofUrl       string     `json:"payment_proof_url"`
+	RevisionCount         int        `json:"revision_count"`
+	RevisionNotes         string     `json:"revision_notes,omitempty"`
+	PaymentRejectedReason string     `json:"payment_rejected_reason,omitempty"`
 }
 
 // OrderItem mencerminkan item-item individual dalam satu Order
 type OrderItem struct {
-	ID          int     `json:"id"`
-	OrderID     int     `json:"order_id"`
-	ProductID   int     `json:"product_id"`
-	VariantID   int     `json:"variant_id"`
-	Quantity    int     `json:"quantity"`
-	Price       float64 `json:"price"`
-	Notes       string  `json:"notes"`
-	ProductName string  `json:"product_name,omitempty"` // Di-join dari tabel products
-	VariantName string  `json:"variant_name,omitempty"` // Di-join dari tabel product_variants
+	ID             int     `json:"id"`
+	OrderID        int     `json:"order_id"`
+	ProductID      int     `json:"product_id"`
+	VariantID      int     `json:"variant_id"`
+	Quantity       int     `json:"quantity"`
+	Price          float64 `json:"price"`
+	Notes          string  `json:"notes"`
+	ProductName    string  `json:"product_name,omitempty"` // Di-join dari tabel products
+	VariantName    string  `json:"variant_name,omitempty"` // Di-join dari tabel product_variants
+	DesignFileID   int     `json:"design_file_id"`
+	DesignFilePath string  `json:"design_file_path"`
+	DesignVersion  int     `json:"design_version"`
+	DesignStatus   string  `json:"design_status"`
+	DesignNotes    string  `json:"design_notes"`
 }
 
 // =========================================================================
@@ -34,28 +44,48 @@ type OrderItem struct {
 
 // OrderDetail digunakan untuk response get detail pesanan / invoice
 type OrderDetail struct {
-	ID                  int               `json:"id"`
-	OrderCode           string            `json:"order_code"`
-	CustomerName        string            `json:"customer_name"`
-	CustomerEmail       string            `json:"customer_email"`
-	CustomerPhone       string            `json:"customer_phone"`
-	Status              string            `json:"status"`
-	TotalPrice          float64           `json:"total_price"`
-	EstimatedFinishDate *time.Time        `json:"estimated_finish_date"`
-	CreatedAt           time.Time         `json:"created_at"`
-	UpdatedAt           *time.Time        `json:"updated_at,omitempty"`
-	Items               []OrderItemDetail `json:"items"`
-	Payment             *PaymentInfo      `json:"payment,omitempty"`
+	ID                    int               `json:"id"`
+	OrderCode             string            `json:"order_code"`
+	CustomerName          string            `json:"customer_name"`
+	CustomerEmail         string            `json:"customer_email"`
+	CustomerPhone         string            `json:"customer_phone"`
+	Status                string            `json:"status"`
+	TotalPrice            float64           `json:"total_price"`
+	EstimatedFinishDate   *time.Time        `json:"estimated_finish_date"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             *time.Time        `json:"updated_at,omitempty"`
+	Items                 []OrderItemDetail `json:"items"`
+	Payment               *PaymentInfo      `json:"payment,omitempty"`
+	StatusLogs            []OrderStatusLog  `json:"status_logs,omitempty"`
+	RevisionCount         int               `json:"revision_count"`
+	RevisionNotes         string            `json:"revision_notes,omitempty"`
+	PaymentRejectedReason string            `json:"payment_rejected_reason,omitempty"`
+}
+
+// OrderStatusLog mencerminkan log riwayat status pesanan
+type OrderStatusLog struct {
+	ID          int       `json:"id"`
+	OrderID     int       `json:"order_id"`
+	Status      string    `json:"status"`
+	ChangedBy   int       `json:"changed_by"`
+	ChangedName string    `json:"changed_name"` // Di-join dari users
+	Notes       string    `json:"notes"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type OrderItemDetail struct {
-	ID          int     `json:"id"`
-	ProductName string  `json:"product_name"`
-	VariantName string  `json:"variant_name"`
-	Quantity    int     `json:"quantity"`
-	Price       float64 `json:"price"` // Harga satuan varian saat dipesan
-	SubTotal    float64 `json:"sub_total"`
-	Notes       string  `json:"notes,omitempty"`
+	ID             int     `json:"id"`
+	ProductName    string  `json:"product_name"`
+	VariantName    string  `json:"variant_name"`
+	Quantity       int     `json:"quantity"`
+	Price          float64 `json:"price"` // Harga satuan varian saat dipesan
+	SubTotal       float64 `json:"sub_total"`
+	Notes          string  `json:"notes,omitempty"`
+	DesignFileID   int     `json:"design_file_id"`
+	DesignFilePath string  `json:"design_file_path"`
+	DesignVersion  int     `json:"design_version"`
+	DesignStatus   string  `json:"design_status"`
+	DesignNotes    string  `json:"design_notes"`
 }
 
 type PaymentInfo struct {
@@ -64,4 +94,5 @@ type PaymentInfo struct {
 	Amount          float64    `json:"amount"`
 	PaymentStatus   string     `json:"payment_status"`
 	VerifiedAt      *time.Time `json:"verified_at,omitempty"`
+	PaymentProof    string     `json:"payment_proof,omitempty"`
 }

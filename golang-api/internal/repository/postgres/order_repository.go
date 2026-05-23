@@ -50,7 +50,7 @@ func (r *orderRepository) Create(ctx context.Context, o *order.Order, items []or
 		VALUES ($1, $2, $3, $4, NOW())
 		RETURNING id
 	`
-	err = tx.QueryRowContext(ctx, queryOrder, o.UserID, o.OrderCode, o.TotalPrice, o.Status).Scan(&o.ID)
+	err = tx.QueryRowContext(ctx, queryOrder, o.UserID, o.OrderCode, o.TotalPrice, "pending_design").Scan(&o.ID)
 	if err != nil {
 		return err
 	}
@@ -65,6 +65,15 @@ func (r *orderRepository) Create(ctx context.Context, o *order.Order, items []or
 		if err != nil {
 			return err
 		}
+	}
+
+	// 3a. Mencatat log saat order baru dibuat (status: pending_design)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'pending_design', $2, 'Pesanan baru dibuat, menunggu upload desain')`,
+		o.ID, o.UserID)
+	if err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -139,7 +148,7 @@ func (r *orderRepository) Checkout(ctx context.Context, userID int) (int, string
 	var orderID int
 	queryOrder := `
 		INSERT INTO orders (user_id, order_code, total_price, status, created_at)
-		VALUES ($1, $2, $3, 'waiting_payment', NOW())
+		VALUES ($1, $2, $3, 'pending_design', NOW())
 		RETURNING id
 	`
 	err = tx.QueryRowContext(ctx, queryOrder, userID, orderCode, total).Scan(&orderID)
@@ -163,6 +172,15 @@ func (r *orderRepository) Checkout(ctx context.Context, userID int) (int, string
 
 	// 5. Kosongkan Keranjang Setelah Checkout Berhasil
 	_, err = tx.ExecContext(ctx, "DELETE FROM cart_items WHERE cart_id = $1", cartID)
+	if err != nil {
+		return 0, "", 0, err
+	}
+
+	// 5a. Mencatat log saat order baru dibuat (status: pending_design)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'pending_design', $2, 'Pesanan baru dibuat via Checkout, menunggu upload desain')`,
+		orderID, userID)
 	if err != nil {
 		return 0, "", 0, err
 	}
@@ -204,7 +222,11 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 		SELECT 
 			o.id, o.order_code, o.status, o.total_price, o.estimated_finish_date, o.created_at, o.updated_at,
 			u.name, u.email, COALESCE(u.phone, ''),
-			pt.transaction_code, pm.name, pt.amount, pt.payment_status, pt.verified_at
+			pt.transaction_code, pm.name, pt.amount, pt.payment_status, pt.verified_at,
+			COALESCE(pt.payment_proof, '') as payment_proof,
+			COALESCE(o.revision_count, 0) as revision_count,
+			COALESCE(o.revision_notes, '') as revision_notes,
+			COALESCE(o.payment_rejected_reason, '') as payment_rejected_reason
 		FROM orders o
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN payment_transactions pt ON pt.order_id = o.id
@@ -212,14 +234,15 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 		WHERE o.id = $1
 	`
 
-	var ptCode, pmName, ptStatus sql.NullString
+	var ptCode, pmName, ptStatus, ptProof sql.NullString
 	var ptAmount sql.NullFloat64
 	var ptVerifiedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, queryHeader, orderID).Scan(
 		&detail.ID, &detail.OrderCode, &detail.Status, &detail.TotalPrice, &detail.EstimatedFinishDate, &detail.CreatedAt, &detail.UpdatedAt,
 		&detail.CustomerName, &detail.CustomerEmail, &detail.CustomerPhone,
-		&ptCode, &pmName, &ptAmount, &ptStatus, &ptVerifiedAt,
+		&ptCode, &pmName, &ptAmount, &ptStatus, &ptVerifiedAt, &ptProof,
+		&detail.RevisionCount, &detail.RevisionNotes, &detail.PaymentRejectedReason,
 	)
 
 	if err == sql.ErrNoRows {
@@ -235,6 +258,7 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 			PaymentMethod:   pmName.String,
 			Amount:          ptAmount.Float64,
 			PaymentStatus:   ptStatus.String,
+			PaymentProof:    ptProof.String,
 		}
 		if ptVerifiedAt.Valid {
 			detail.Payment.VerifiedAt = &ptVerifiedAt.Time
@@ -244,10 +268,25 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 	// 2. Get Items
 	queryItems := `
 		SELECT 
-			oi.id, p.name, COALESCE(pv.variant_name, ''), oi.quantity, oi.price, (oi.quantity * oi.price) as sub_total, COALESCE(oi.notes, '')
+			oi.id, p.name, COALESCE(pv.variant_name, ''), oi.quantity, oi.price, (oi.quantity * oi.price) as sub_total, COALESCE(oi.notes, ''),
+			COALESCE(df.id, 0) as design_file_id,
+			COALESCE(df.file_path, '') as design_file_path,
+			COALESCE(df.version, 0) as design_version,
+			COALESCE(dr.status, 'pending') as design_status,
+			COALESCE(dr.notes, '') as design_notes
 		FROM order_items oi
 		JOIN products p ON p.id = oi.product_id
 		LEFT JOIN product_variants pv ON pv.id = oi.variant_id
+		LEFT JOIN (
+			SELECT DISTINCT ON (order_item_id) id, order_item_id, file_path, version
+			FROM design_files
+			ORDER BY order_item_id, id DESC
+		) df ON df.order_item_id = oi.id
+		LEFT JOIN (
+			SELECT DISTINCT ON (design_file_id) id, design_file_id, status, notes
+			FROM design_reviews
+			ORDER BY design_file_id, id DESC
+		) dr ON dr.design_file_id = df.id
 		WHERE oi.order_id = $1
 	`
 
@@ -262,6 +301,7 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 		var item order.OrderItemDetail
 		if err := rows.Scan(
 			&item.ID, &item.ProductName, &item.VariantName, &item.Quantity, &item.Price, &item.SubTotal, &item.Notes,
+			&item.DesignFileID, &item.DesignFilePath, &item.DesignVersion, &item.DesignStatus, &item.DesignNotes,
 		); err != nil {
 			return nil, err
 		}
@@ -269,6 +309,32 @@ func (r *orderRepository) FindDetailByID(ctx context.Context, orderID int) (*ord
 	}
 
 	detail.Items = items
+
+	// 3. Get Status Logs
+	queryLogs := `
+		SELECT 
+			osl.id, osl.order_id, osl.status, osl.changed_by, u.name as changed_name, osl.notes, osl.created_at
+		FROM order_status_logs osl
+		JOIN users u ON u.id = osl.changed_by
+		WHERE osl.order_id = $1
+		ORDER BY osl.created_at ASC
+	`
+	logRows, err := r.db.QueryContext(ctx, queryLogs, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer logRows.Close()
+
+	var statusLogs []order.OrderStatusLog
+	for logRows.Next() {
+		var log order.OrderStatusLog
+		if err := logRows.Scan(&log.ID, &log.OrderID, &log.Status, &log.ChangedBy, &log.ChangedName, &log.Notes, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		statusLogs = append(statusLogs, log)
+	}
+	detail.StatusLogs = statusLogs
+
 	return &detail, nil
 }
 
@@ -300,6 +366,15 @@ func (r *orderRepository) Cancel(ctx context.Context, orderID int, userID int) e
 
 	query := `UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`
 	_, err = tx.ExecContext(ctx, query, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3a. Mencatat log saat order dibatalkan (status: cancelled)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'cancelled', $2, 'Pesanan dibatalkan oleh pengguna')`,
+		orderID, userID)
 	if err != nil {
 		return err
 	}
@@ -357,9 +432,15 @@ func (r *orderRepository) Cancel(ctx context.Context, orderID int, userID int) e
 // =========================================================================
 // UPDATE STATUS
 // =========================================================================
-func (r *orderRepository) UpdateStatus(ctx context.Context, orderID int, status string) error {
+func (r *orderRepository) UpdateStatus(ctx context.Context, orderID int, status string, changedBy int, notes string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	query := `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`
-	res, err := r.db.ExecContext(ctx, query, status, orderID)
+	res, err := tx.ExecContext(ctx, query, status, orderID)
 	if err != nil {
 		return err
 	}
@@ -368,7 +449,17 @@ func (r *orderRepository) UpdateStatus(ctx context.Context, orderID int, status 
 	if rows == 0 {
 		return fmt.Errorf("pesanan tidak ditemukan")
 	}
-	return nil
+
+	// Mencatat log setiap kali ada pembaruan status generik beserta catatan dan ID pengubahnya
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, $2, $3, $4)`,
+		orderID, status, changedBy, notes)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // =========================================================================
@@ -376,10 +467,19 @@ func (r *orderRepository) UpdateStatus(ctx context.Context, orderID int, status 
 // =========================================================================
 func (r *orderRepository) GetOrdersByUserID(ctx context.Context, userID int) ([]order.Order, error) {
 	query := `
-		SELECT id, user_id, order_code, total_price, status, created_at
-		FROM orders
-		WHERE user_id = $1
-		ORDER BY created_at DESC
+		SELECT o.id, o.user_id, o.order_code, o.total_price, o.status, o.created_at,
+		       COALESCE(pt.id, 0) as payment_id, COALESCE(pt.payment_proof, '') as payment_proof_url,
+		       COALESCE(o.revision_count, 0) as revision_count,
+		       COALESCE(o.revision_notes, '') as revision_notes,
+		       COALESCE(o.payment_rejected_reason, '') as payment_rejected_reason
+		FROM orders o
+		LEFT JOIN (
+			SELECT DISTINCT ON (order_id) id, order_id, payment_proof
+			FROM payment_transactions
+			ORDER BY order_id, id DESC
+		) pt ON pt.order_id = o.id
+		WHERE o.user_id = $1
+		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query, userID)
 }
@@ -389,9 +489,18 @@ func (r *orderRepository) GetOrdersByUserID(ctx context.Context, userID int) ([]
 // =========================================================================
 func (r *orderRepository) GetAllOrders(ctx context.Context) ([]order.Order, error) {
 	query := `
-		SELECT id, user_id, order_code, total_price, status, created_at
-		FROM orders
-		ORDER BY created_at DESC
+		SELECT o.id, o.user_id, o.order_code, o.total_price, o.status, o.created_at,
+		       COALESCE(pt.id, 0) as payment_id, COALESCE(pt.payment_proof, '') as payment_proof_url,
+		       COALESCE(o.revision_count, 0) as revision_count,
+		       COALESCE(o.revision_notes, '') as revision_notes,
+		       COALESCE(o.payment_rejected_reason, '') as payment_rejected_reason
+		FROM orders o
+		LEFT JOIN (
+			SELECT DISTINCT ON (order_id) id, order_id, payment_proof
+			FROM payment_transactions
+			ORDER BY order_id, id DESC
+		) pt ON pt.order_id = o.id
+		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query)
 }
@@ -407,7 +516,8 @@ func (r *orderRepository) scanOrders(ctx context.Context, query string, args ...
 	var orders []order.Order
 	for rows.Next() {
 		var o order.Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.OrderCode, &o.TotalPrice, &o.Status, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.UserID, &o.OrderCode, &o.TotalPrice, &o.Status, &o.CreatedAt, &o.PaymentID, &o.PaymentProofUrl,
+			&o.RevisionCount, &o.RevisionNotes, &o.PaymentRejectedReason); err != nil {
 			return nil, err
 		}
 		orders = append(orders, o)
@@ -422,10 +532,25 @@ func (r *orderRepository) scanOrders(ctx context.Context, query string, args ...
 			SELECT oi.id, oi.order_id, oi.product_id, COALESCE(oi.variant_id, 0), oi.quantity, oi.price, 
 			       COALESCE(oi.notes, ''),
 			       COALESCE(p.name, ''),
-			       COALESCE(pv.variant_name, '')
+			       COALESCE(pv.variant_name, ''),
+			       COALESCE(df.id, 0) as design_file_id,
+			       COALESCE(df.file_path, '') as design_file_path,
+			       COALESCE(df.version, 0) as design_version,
+			       COALESCE(dr.status, '') as design_status,
+			       COALESCE(dr.notes, '') as design_notes
 			FROM order_items oi
 			LEFT JOIN products p ON p.id = oi.product_id
 			LEFT JOIN product_variants pv ON pv.id = oi.variant_id
+			LEFT JOIN (
+				SELECT DISTINCT ON (order_item_id) id, order_item_id, file_path, version
+				FROM design_files
+				ORDER BY order_item_id, id DESC
+			) df ON df.order_item_id = oi.id
+			LEFT JOIN (
+				SELECT DISTINCT ON (design_file_id) id, design_file_id, status, notes
+				FROM design_reviews
+				ORDER BY design_file_id, id DESC
+			) dr ON dr.design_file_id = df.id
 			WHERE oi.order_id = $1
 		`
 		itemRows, err := r.db.QueryContext(ctx, itemQuery, orders[i].ID)
@@ -440,6 +565,7 @@ func (r *orderRepository) scanOrders(ctx context.Context, query string, args ...
 				&item.ID, &item.OrderID, &item.ProductID, &item.VariantID,
 				&item.Quantity, &item.Price, &item.Notes,
 				&item.ProductName, &item.VariantName,
+				&item.DesignFileID, &item.DesignFilePath, &item.DesignVersion, &item.DesignStatus, &item.DesignNotes,
 			); err != nil {
 				itemRows.Close()
 				return nil, err
@@ -464,12 +590,18 @@ func (r *orderRepository) scanOrders(ctx context.Context, query string, args ...
 // COMPLETE ORDER (Customer mengonfirmasi barang diterima)
 // =========================================================================
 func (r *orderRepository) CompleteOrder(ctx context.Context, orderID int, userID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	query := `
 		UPDATE orders 
 		SET status = 'completed', updated_at = NOW() 
 		WHERE id = $1 AND user_id = $2 AND status = 'ready'
 	`
-	res, err := r.db.ExecContext(ctx, query, orderID, userID)
+	res, err := tx.ExecContext(ctx, query, orderID, userID)
 	if err != nil {
 		return err
 	}
@@ -478,5 +610,604 @@ func (r *orderRepository) CompleteOrder(ctx context.Context, orderID int, userID
 	if rows == 0 {
 		return fmt.Errorf("pesanan tidak ditemukan, bukan milik anda, atau statusnya bukan 'ready'")
 	}
-	return nil
+
+	// Mencatat log saat pesanan dikonfirmasi selesai oleh pelanggan (status: completed)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes) 
+		VALUES ($1, 'completed', $2, 'Pesanan dikonfirmasi selesai oleh pelanggan')`,
+		orderID, userID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
+
+// =========================================================================
+// BUY NOW (beli langsung 1 item tanpa keranjang)
+// =========================================================================
+func (r *orderRepository) BuyNow(ctx context.Context, userID int, productID int, variantID int, quantity int, notes string) (int, string, float64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 1. Ambil harga varian dari DB
+	var price float64
+	err = tx.QueryRowContext(ctx, "SELECT price FROM product_variants WHERE id = $1", variantID).Scan(&price)
+	if err == sql.ErrNoRows {
+		return 0, "", 0, fmt.Errorf("varian produk tidak ditemukan")
+	}
+	if err != nil {
+		return 0, "", 0, err
+	}
+
+	total := price * float64(quantity)
+
+	// 2. Buat Order
+	orderCode := fmt.Sprintf("ORD-%d%d", userID, time.Now().Unix())
+	var orderID int
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO orders (user_id, order_code, total_price, status, created_at)
+		VALUES ($1, $2, $3, 'pending_design', NOW())
+		RETURNING id`,
+		userID, orderCode, total,
+	).Scan(&orderID)
+	if err != nil {
+		return 0, "", 0, err
+	}
+
+	// 3. Insert order item
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_items (order_id, product_id, variant_id, quantity, price, notes)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		orderID, productID, variantID, quantity, price, notes,
+	)
+	if err != nil {
+		return 0, "", 0, err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'pending_design', $2, 'Pesanan dibuat via Beli Sekarang, menunggu upload desain')`,
+		orderID, userID)
+	if err != nil {
+		return 0, "", 0, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return 0, "", 0, err
+	}
+	return orderID, orderCode, total, nil
+}
+
+// =========================================================================
+// UPLOAD DESIGN (per item)
+// =========================================================================
+func (r *orderRepository) UploadDesign(ctx context.Context, orderID int, orderItemID int, filePath string, userID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Validasi order milik user & status masih pending_design
+	var status string
+	var ownerID int
+	err = tx.QueryRowContext(ctx, "SELECT status, user_id FROM orders WHERE id = $1", orderID).Scan(&status, &ownerID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan")
+	}
+	if err != nil {
+		return err
+	}
+	if ownerID != userID {
+		return fmt.Errorf("akses ditolak")
+	}
+	if status != "pending_design" && status != "revision_requested" {
+		return fmt.Errorf("desain tidak bisa diupload pada status: %s", status)
+	}
+
+	// 2. Cek versi terbaru desain untuk item ini
+	var latestVersion int
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM design_files WHERE order_item_id = $1`,
+		orderItemID).Scan(&latestVersion)
+
+	// 3. Simpan file desain
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO design_files (order_item_id, file_path, version, uploaded_by, created_at)
+		VALUES ($1, $2, $3, $4, NOW())`,
+		orderItemID, filePath, latestVersion+1, userID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Cek apakah SEMUA order_items sudah ada design_file
+	var totalItems, itemsWithDesign int
+	_ = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_items WHERE order_id = $1", orderID).Scan(&totalItems)
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT oi.id)
+		FROM order_items oi
+		JOIN design_files df ON df.order_item_id = oi.id
+		WHERE oi.order_id = $1`, orderID).Scan(&itemsWithDesign)
+
+	// 5. Jika semua sudah, update status order → design_uploaded
+	if totalItems > 0 && itemsWithDesign >= totalItems {
+		_, err = tx.ExecContext(ctx, `
+			UPDATE orders SET status = 'design_uploaded', updated_at = NOW() WHERE id = $1`, orderID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+			VALUES ($1, 'design_uploaded', $2, 'Semua desain telah diupload, siap untuk pembayaran')`,
+			orderID, userID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// REUPLOAD DESIGN (setelah revisi staff)
+// =========================================================================
+func (r *orderRepository) ReuploadDesign(ctx context.Context, orderID int, orderItemID int, filePath string, userID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Validasi status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1 AND user_id = $2", orderID, userID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan atau akses ditolak")
+	}
+	if status != "revision_requested" {
+		return fmt.Errorf("upload ulang hanya diizinkan saat status revision_requested")
+	}
+
+	// 2. Cek versi terbaru
+	var latestVersion int
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version), 0) FROM design_files WHERE order_item_id = $1`,
+		orderItemID).Scan(&latestVersion)
+
+	// 3. Simpan desain baru
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO design_files (order_item_id, file_path, version, uploaded_by, created_at)
+		VALUES ($1, $2, $3, $4, NOW())`,
+		orderItemID, filePath, latestVersion+1, userID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Cek apakah semua item sudah re-upload
+	var totalItems, itemsWithNewDesign int
+	_ = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_items WHERE order_id = $1", orderID).Scan(&totalItems)
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT oi.id)
+		FROM order_items oi
+		JOIN design_files df ON df.order_item_id = oi.id
+		WHERE oi.order_id = $1`, orderID).Scan(&itemsWithNewDesign)
+
+	if totalItems > 0 && itemsWithNewDesign >= totalItems {
+		// Update status ke design_review — kembali ke antrian staff
+		_, err = tx.ExecContext(ctx, `
+			UPDATE orders SET status = 'design_review', updated_at = NOW() WHERE id = $1`, orderID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+			VALUES ($1, 'design_review', $2, 'Customer telah mengupload ulang desain setelah revisi')`,
+			orderID, userID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// UPLOAD PAYMENT (bukti transfer)
+// =========================================================================
+func (r *orderRepository) UploadPayment(ctx context.Context, orderID int, userID int, filePath string, amount float64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Validasi status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1 AND user_id = $2", orderID, userID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan atau akses ditolak")
+	}
+	if status != "design_uploaded" {
+		return fmt.Errorf("upload bukti bayar hanya tersedia setelah semua desain diupload (status saat ini: %s)", status)
+	}
+
+	// 2. Dapatkan payment_method_id untuk transfer manual (default id=1)
+	var paymentMethodID int
+	err = tx.QueryRowContext(ctx, "SELECT id FROM payment_methods WHERE name ILIKE '%transfer%' LIMIT 1").Scan(&paymentMethodID)
+	if err != nil {
+		paymentMethodID = 1 // fallback
+	}
+
+	// 3. Generate transaction code
+	txCode := fmt.Sprintf("TRX-%d-%d", orderID, time.Now().Unix())
+
+	// 4. Insert payment transaction
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO payment_transactions (order_id, payment_method_id, transaction_code, amount, payment_proof, payment_status, created_at)
+		VALUES ($1, $2, $3, $4, $5, 'pending', NOW())`,
+		orderID, paymentMethodID, txCode, amount, filePath)
+	if err != nil {
+		return err
+	}
+
+	// 5. Update order status → payment_verification
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'payment_verification', updated_at = NOW() WHERE id = $1`, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 6. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'payment_verification', $2, 'Bukti pembayaran diupload, menunggu verifikasi staf')`,
+		orderID, userID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// REUPLOAD PAYMENT (setelah ditolak)
+// =========================================================================
+func (r *orderRepository) ReuploadPayment(ctx context.Context, orderID int, userID int, filePath string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Validasi status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1 AND user_id = $2", orderID, userID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan atau akses ditolak")
+	}
+	if status != "payment_rejected" {
+		return fmt.Errorf("upload ulang bukti bayar hanya tersedia saat status payment_rejected")
+	}
+
+	// 2. Update payment proof pada transaksi terakhir
+	_, err = tx.ExecContext(ctx, `
+		UPDATE payment_transactions
+		SET payment_proof = $1, payment_status = 'pending', updated_at = NOW()
+		WHERE order_id = $2
+		  AND id = (SELECT id FROM payment_transactions WHERE order_id = $2 ORDER BY id DESC LIMIT 1)`,
+		filePath, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Hapus alasan penolakan, update status
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders 
+		SET status = 'payment_verification', payment_rejected_reason = NULL, updated_at = NOW()
+		WHERE id = $1`, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'payment_verification', $2, 'Bukti pembayaran diupload ulang setelah penolakan')`,
+		orderID, userID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// APPROVE PAYMENT (staff)
+// =========================================================================
+func (r *orderRepository) ApprovePayment(ctx context.Context, orderID int, staffID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Cek status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1", orderID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan")
+	}
+	if status != "payment_verification" {
+		return fmt.Errorf("pesanan tidak sedang dalam verifikasi pembayaran")
+	}
+
+	// 2. Update payment_transactions → verified
+	_, err = tx.ExecContext(ctx, `
+		UPDATE payment_transactions
+		SET payment_status = 'verified', verified_at = NOW()
+		WHERE order_id = $1
+		  AND id = (SELECT id FROM payment_transactions WHERE order_id = $1 ORDER BY id DESC LIMIT 1)`,
+		orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Update order status → design_review
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'design_review', updated_at = NOW() WHERE id = $1`, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'design_review', $2, 'Pembayaran diverifikasi oleh staf, lanjut ke review desain')`,
+		orderID, staffID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// REJECT PAYMENT (staff)
+// =========================================================================
+func (r *orderRepository) RejectPayment(ctx context.Context, orderID int, staffID int, reason string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Cek status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1", orderID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan")
+	}
+	if status != "payment_verification" {
+		return fmt.Errorf("pesanan tidak sedang dalam verifikasi pembayaran")
+	}
+
+	// 2. Update payment_transactions → rejected
+	_, err = tx.ExecContext(ctx, `
+		UPDATE payment_transactions
+		SET payment_status = 'rejected'
+		WHERE order_id = $1
+		  AND id = (SELECT id FROM payment_transactions WHERE order_id = $1 ORDER BY id DESC LIMIT 1)`,
+		orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Update order: simpan alasan + update status
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders 
+		SET status = 'payment_rejected', payment_rejected_reason = $1, updated_at = NOW()
+		WHERE id = $2`,
+		reason, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'payment_rejected', $2, $3)`,
+		orderID, staffID, "Pembayaran ditolak: "+reason)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// APPROVE DESIGN (staff) → langsung ke printing
+// =========================================================================
+func (r *orderRepository) ApproveDesign(ctx context.Context, orderID int, staffID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Cek status
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1", orderID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan")
+	}
+	if status != "design_review" {
+		return fmt.Errorf("pesanan tidak sedang dalam review desain")
+	}
+
+	// 2. Update semua design_reviews terbaru → approved
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO design_reviews (design_file_id, status, notes, reviewed_by, created_at)
+		SELECT DISTINCT ON (df.order_item_id) df.id, 'approved', 'Desain disetujui oleh staf', $1, NOW()
+		FROM design_files df
+		JOIN order_items oi ON oi.id = df.order_item_id
+		WHERE oi.order_id = $2
+		ORDER BY df.order_item_id, df.id DESC`,
+		staffID, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Update order status → printing
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'printing', updated_at = NOW() WHERE id = $1`, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'printing', $2, 'Desain disetujui, pesanan masuk antrian cetak')`,
+		orderID, staffID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// REQUEST REVISION (staff) — maks 3x
+// =========================================================================
+func (r *orderRepository) RequestRevision(ctx context.Context, orderID int, staffID int, notes string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Cek status dan revision_count
+	var status string
+	var revisionCount int
+	err = tx.QueryRowContext(ctx, "SELECT status, revision_count FROM orders WHERE id = $1", orderID).Scan(&status, &revisionCount)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pesanan tidak ditemukan")
+	}
+	if status != "design_review" {
+		return fmt.Errorf("revisi hanya bisa diminta saat status design_review")
+	}
+	if revisionCount >= 3 {
+		return fmt.Errorf("batas maksimum revisi (3x) telah tercapai")
+	}
+
+	// 2. Insert design_reviews → revision
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO design_reviews (design_file_id, status, notes, reviewed_by, created_at)
+		SELECT DISTINCT ON (df.order_item_id) df.id, 'revision', $1, $2, NOW()
+		FROM design_files df
+		JOIN order_items oi ON oi.id = df.order_item_id
+		WHERE oi.order_id = $3
+		ORDER BY df.order_item_id, df.id DESC`,
+		notes, staffID, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Update order: increment revision_count + simpan notes + update status
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders
+		SET status = 'revision_requested',
+		    revision_count = revision_count + 1,
+		    revision_notes = $1,
+		    updated_at = NOW()
+		WHERE id = $2`,
+		notes, orderID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Status log
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'revision_requested', $2, $3)`,
+		orderID, staffID, fmt.Sprintf("Revisi ke-%d: %s", revisionCount+1, notes))
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// START PRINTING (staff) — opsional, biasanya sudah set dari ApproveDesign
+// =========================================================================
+func (r *orderRepository) StartPrinting(ctx context.Context, orderID int, staffID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'printing', updated_at = NOW()
+		WHERE id = $1 AND status = 'design_review'`, orderID)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("pesanan tidak ditemukan atau statusnya bukan design_review")
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'printing', $2, 'Proses cetak dimulai')`,
+		orderID, staffID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// =========================================================================
+// FINISH PRINTING (staff) → ready
+// =========================================================================
+func (r *orderRepository) FinishPrinting(ctx context.Context, orderID int, staffID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE orders SET status = 'ready', updated_at = NOW()
+		WHERE id = $1 AND status = 'printing'`, orderID)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("pesanan tidak ditemukan atau statusnya bukan printing")
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO order_status_logs (order_id, status, changed_by, notes)
+		VALUES ($1, 'ready', $2, 'Cetak selesai, pesanan siap diambil customer')`,
+		orderID, staffID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+

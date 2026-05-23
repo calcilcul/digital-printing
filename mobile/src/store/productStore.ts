@@ -46,7 +46,10 @@ export const useProductStore = create<ProductState>((set, get) => ({
       
       const mappedProducts = data.map((p: any) => ({
         ...p,
-        image: 'https://placehold.co/400x300?text=' + encodeURIComponent(p.name),
+        // Gunakan image_url dari backend, fallback ke placeholder jika kosong
+        image: p.image_url && p.image_url !== ''
+          ? p.image_url
+          : `https://placehold.co/400x300/1E3A8A/white?text=${encodeURIComponent(p.name)}`,
       }));
 
       set({ products: mappedProducts, isLoading: false });

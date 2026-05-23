@@ -53,6 +53,7 @@ func AuthMiddleware(userRepo user.Repository) gin.HandlerFunc {
 			})
 
 			if err != nil || !token.Valid {
+				log.Println("JWT Parse Error:", err)
 				c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid token signature"})
 				c.Abort()
 				return

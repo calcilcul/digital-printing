@@ -1,8 +1,13 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,8 +48,8 @@ func (h *DesignHandler) UploadDesign(c *gin.Context) {
 		return
 	}
 
-	// Ambil file dari form-data dengan key "file"
-	file, err := c.FormFile("file")
+	// Ambil file dari form-data dengan key "design_file"
+	file, err := c.FormFile("design_file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan dalam request (gunakan key 'file')"})
 		return
@@ -79,6 +84,22 @@ func (h *DesignHandler) UploadDesign(c *gin.Context) {
 		return
 	}
 
+	// 🧪 Hubungkan ke Python AI untuk validasi blur jika filenya adalah gambar
+	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
+		isSharp, aiErr := checkBlurWithAI(savePath)
+		if aiErr != nil {
+			// Hubungan ke AI terputus/off, fallback log dan izinkan agar tidak menghalangi testing lokal
+			fmt.Printf("[AI Warning] Gagal verifikasi blur via Python AI: %v. Fallback: diizinkan.\n", aiErr)
+		} else if !isSharp {
+			// Gambar blur! Hapus file fisik lokal yang sudah terlanjur di-SaveUploadedFile
+			_ = os.Remove(savePath)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Upload ditolak oleh AI: File desain yang Anda unggah terdeteksi buram/blur. Silakan unggah gambar dengan kualitas lebih tajam.",
+			})
+			return
+		}
+	}
+
 	customerID := c.GetInt("user_id")
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
@@ -86,9 +107,17 @@ func (h *DesignHandler) UploadDesign(c *gin.Context) {
 	// Proses ke usecase (validasi kepemilikan ada di dalam usecase)
 	designFile, err := h.designUsecase.UploadDesign(c.Request.Context(), orderItemID, dbPath, customerID, ip, ua)
 	if err != nil {
+		// Hapus file fisik lokal yang terlanjur di-upload jika proses database gagal
+		_ = os.Remove(savePath)
+		
 		// ✅ Kembalikan 403 jika error adalah masalah kepemilikan
 		if err.Error() == "akses ditolak: order item ini bukan milik Anda" {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		// Batas maksimum upload tercapai
+		if strings.Contains(err.Error(), "batas maksimum") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -99,6 +128,59 @@ func (h *DesignHandler) UploadDesign(c *gin.Context) {
 		"message": "File desain berhasil diunggah",
 		"data":    designFile,
 	})
+}
+
+// checkBlurWithAI memanggil service Python AI untuk memverifikasi ketajaman gambar
+func checkBlurWithAI(filePath string) (bool, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return false, err
+	}
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return false, err
+	}
+	writer.Close()
+
+	// Timeout 3 detik agar sistem tidak hang jika python AI mati
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest("POST", "http://localhost:5000/predict-blur", body)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("server AI mengembalikan status: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+
+	// Jika terdeteksi "blur", kembalikan false (tidak tajam)
+	if result.Status == "blur" {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // GetDesignsByOrderItemID mendapatkan riwayat desain untuk satu item pesanan

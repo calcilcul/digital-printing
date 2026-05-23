@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, Platform, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRoute, useNavigation } from '@react-navigation/native';
@@ -13,6 +13,11 @@ export default function PaymentScreen() {
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+
+  // States untuk Validasi Form (1.5)
+  const [senderBank, setSenderBank] = useState('');
+  const [senderName, setSenderName] = useState('');
+  const [transferAmount, setTransferAmount] = useState((amount || 0).toString());
 
   const pickDocument = async () => {
     try {
@@ -31,6 +36,22 @@ export default function PaymentScreen() {
   };
 
   const uploadFile = async () => {
+    if (!senderBank.trim()) {
+      Alert.alert('Peringatan', 'Silakan masukkan Bank Asal terlebih dahulu (contoh: BCA, Mandiri)');
+      return;
+    }
+
+    if (!senderName.trim()) {
+      Alert.alert('Peringatan', 'Silakan masukkan Nama Pengirim/Pemilik Rekening terlebih dahulu');
+      return;
+    }
+
+    const parsedAmount = parseFloat(transferAmount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Peringatan', 'Nominal transfer tidak valid');
+      return;
+    }
+
     if (!file) {
       Alert.alert('Peringatan', 'Silakan pilih file bukti pembayaran terlebih dahulu');
       return;
@@ -45,9 +66,11 @@ export default function PaymentScreen() {
     setUploadProgress(0);
 
     const formData = new FormData();
+    const combinedTrxCode = `${senderBank.trim().toUpperCase()} - ${senderName.trim()}`;
     
     formData.append('order_id', orderId.toString());
-    formData.append('amount', (amount || 0).toString());
+    formData.append('amount', parsedAmount.toString());
+    formData.append('transaction_code', combinedTrxCode);
     formData.append('payment_proof', {
       uri: Platform.OS === 'ios' ? file.uri.replace('file://', '') : file.uri,
       type: file.mimeType || 'image/jpeg',
@@ -99,8 +122,47 @@ export default function PaymentScreen() {
           <Text className="text-gray-700">BCA: 1234567890 a/n Jaya Mandiri</Text>
           <Text className="text-gray-700">Mandiri: 0987654321 a/n Jaya Mandiri</Text>
           <Text className="text-blue-800 font-bold mt-2">
-            Total Transfer: Rp {(amount || 0).toLocaleString('id-ID')}
+            Total Tagihan: Rp {(amount || 0).toLocaleString('id-ID')}
           </Text>
+        </View>
+
+        {/* Form Inputs (1.5) */}
+        <View className="bg-white p-5 rounded-3xl border border-gray-200 mb-6">
+          <Text className="text-gray-900 font-black text-base mb-4">Form Konfirmasi Transfer</Text>
+          
+          <View>
+            <Text className="text-gray-500 text-xs font-bold mb-1.5 uppercase">Bank Asal</Text>
+            <TextInput
+              className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 font-medium"
+              placeholder="Contoh: BCA, Mandiri, BNI"
+              value={senderBank}
+              onChangeText={setSenderBank}
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
+
+          <View className="mt-4">
+            <Text className="text-gray-500 text-xs font-bold mb-1.5 uppercase">Nama Pemilik Rekening</Text>
+            <TextInput
+              className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 font-medium"
+              placeholder="Masukkan nama pengirim"
+              value={senderName}
+              onChangeText={setSenderName}
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
+
+          <View className="mt-4">
+            <Text className="text-gray-500 text-xs font-bold mb-1.5 uppercase">Nominal Transfer (Rp)</Text>
+            <TextInput
+              className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 font-bold text-blue-600"
+              placeholder="Masukkan nominal transfer"
+              value={transferAmount}
+              onChangeText={setTransferAmount}
+              keyboardType="numeric"
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
         </View>
 
         <View 

@@ -38,6 +38,10 @@ func (u *DesignUsecase) UploadDesign(ctx context.Context, orderItemID int, fileP
 		return nil, err
 	}
 
+	if latestVersion >= 3 {
+		return nil, errors.New("akses ditolak: batas maksimum upload desain (3 versi) telah tercapai")
+	}
+
 	newVersion := latestVersion + 1
 
 	d := &design.DesignFile{
