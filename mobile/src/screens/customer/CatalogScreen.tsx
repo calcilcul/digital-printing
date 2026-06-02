@@ -1,298 +1,523 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, Image, FlatList, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useProductStore } from '../../store/productStore';
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  TextInput,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  StatusBar,
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Search, X, SlidersHorizontal, LayoutGrid, List as ListIcon, Heart, Plus } from 'lucide-react-native';
-import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { CustomerStackParamList } from '../../navigation/CustomerTabs';
+import { useProductStore, Product } from '../../store/productStore';
 import { useCartStore } from '../../store/cartStore';
-import { useAuthStore } from '../../store/authStore';
+import {
+  Search,
+  ShoppingCart,
+  Package,
+  X,
+  SlidersHorizontal,
+  Tag,
+  Sparkles,
+} from 'lucide-react-native';
 
-const CATEGORIES = ['All', 'Business Cards', 'Banners', 'Flyers', 'Stickers', 'Apparel', 'Mugs', 'Posters'];
+type CatalogScreenNavigationProp = NativeStackNavigationProp<CustomerStackParamList, 'Tabs'>;
 
-export default function CatalogScreen() {
-  const { products } = useProductStore();
-  const { addItem } = useCartStore();
-  const { token } = useAuthStore();
-  const navigation = useNavigation<any>();
-  const route = useRoute<any>();
-  
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [isGridMode, setIsGridMode] = useState(true);
-  const [activeSort, setActiveSort] = useState('Featured');
-  
-  const bottomSheetRef = useRef<BottomSheet>(null);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-  // Sync with route params from HomeScreen
+// Category icon/emoji mapping
+const CATEGORY_ICONS: Record<string, string> = {
+  'Semua': '🛍️',
+  'Brosur': '📄',
+  'Banner': '🚩',
+  'Poster': '🖼️',
+  'Kartu Nama': '💳',
+  'Stiker': '✨',
+  'Spanduk': '🎌',
+  'Undangan': '💌',
+  'Kalender': '📅',
+  'Nota': '📝',
+};
+
+// Skeleton card for loading
+const SkeletonCard = ({ delay = 0 }: { delay?: number }) => {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
   useEffect(() => {
-    if (route.params?.initialSearch !== undefined) {
-      setSearchQuery(route.params.initialSearch);
-    }
-    if (route.params?.initialCategory !== undefined) {
-      // Map category name from Home if needed
-      const categoryMap: Record<string, string> = {
-        'Business Cards': 'Business Cards',
-        'Banners': 'Banners',
-        'Flyers': 'Flyers',
-        'Posters': 'Posters',
-        'Apparel': 'Apparel',
-        'Stickers': 'Stickers'
-      };
-      const mappedCat = categoryMap[route.params.initialCategory] || 'All';
-      setActiveCategory(mappedCat);
-    }
-  }, [route.params]);
-
-  const filteredProducts = useMemo(() => {
-    let result = products.filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      let matchesCategory = true;
-      if (activeCategory !== 'All') {
-        const nameLower = p.name.toLowerCase();
-        if (activeCategory === 'Banners') {
-          matchesCategory = nameLower.includes('banner') || nameLower.includes('spanduk');
-        } else if (activeCategory === 'Posters') {
-          matchesCategory = nameLower.includes('poster');
-        } else if (activeCategory === 'Flyers') {
-          matchesCategory = nameLower.includes('brosur') || nameLower.includes('flyer');
-        } else if (activeCategory === 'Business Cards') {
-          matchesCategory = nameLower.includes('kartu nama') || nameLower.includes('card');
-        } else if (activeCategory === 'Stickers') {
-          matchesCategory = nameLower.includes('stiker') || nameLower.includes('sticker');
-        } else if (activeCategory === 'Apparel') {
-          matchesCategory = nameLower.includes('kaos') || nameLower.includes('baju') || nameLower.includes('tote bag');
-        } else if (activeCategory === 'Mugs') {
-          matchesCategory = nameLower.includes('mug');
-        } else {
-          matchesCategory = false;
-        }
-      }
-      
-      return matchesSearch && matchesCategory;
-    });
-    // Sort logic
-    if (activeSort === 'Price L-H') result = [...result].sort((a, b) => a.base_price - b.base_price);
-    else if (activeSort === 'Price H-L') result = [...result].sort((a, b) => b.base_price - a.base_price);
-    else if (activeSort === 'Newest') result = [...result].sort((a, b) => b.id - a.id);
-    return result;
-  }, [products, searchQuery, activeCategory, activeSort]);
-
-  const handleQuickAdd = async (product: any) => {
-    if (!token) {
-      Alert.alert(
-        'Login Diperlukan',
-        'Silakan masuk ke akun Anda terlebih dahulu untuk menambahkan produk ke keranjang.',
-        [
-          { text: 'Batal', style: 'cancel' },
-          { text: 'Masuk', onPress: () => navigation.navigate('Login') }
-        ]
-      );
-      return;
-    }
-    if (product.variants && product.variants.length > 0) {
-      const success = await addItem(product.id, product.variants[0].id, 1);
-      if (success) {
-        Alert.alert('Sukses', 'Produk berhasil ditambahkan ke keranjang!');
-      } else {
-        Alert.alert('Gagal', 'Gagal menambahkan produk ke keranjang.');
-      }
-    }
-  };
-
-  const renderProductGrid = ({ item }: { item: any }) => (
-    <View className="w-[48%] bg-white rounded-3xl mb-4 shadow-sm border border-border overflow-hidden">
-      <TouchableOpacity onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}>
-        <View className="h-40 bg-gray-100 relative">
-          <Image source={{ uri: item.image }} className="w-full h-full" resizeMode="cover" />
-          <TouchableOpacity className="absolute top-3 right-3 w-8 h-8 bg-white/80 rounded-full items-center justify-center">
-            <Heart size={16} color="#64748B" />
-          </TouchableOpacity>
-        </View>
-        <View className="p-4">
-          <Text className="text-xs text-primary font-bold mb-1 uppercase">Printing</Text>
-          <Text className="text-text font-bold text-sm mb-2" numberOfLines={2}>{item.name}</Text>
-          <Text className="text-text font-extrabold">Rp {item.base_price.toLocaleString('id-ID')}</Text>
-        </View>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        onPress={() => handleQuickAdd(item)}
-        className="absolute bottom-3 right-3 w-8 h-8 bg-primary rounded-full items-center justify-center shadow-sm"
-      >
-        <Plus size={16} color="white" />
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderProductList = ({ item }: { item: any }) => (
-    <View className="bg-white rounded-2xl mb-3 shadow-sm border border-border overflow-hidden flex-row p-3">
-      <TouchableOpacity 
-        className="flex-row flex-1"
-        onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
-      >
-        <View className="w-24 h-24 bg-gray-100 rounded-xl relative overflow-hidden">
-          <Image source={{ uri: item.image }} className="w-full h-full" resizeMode="cover" />
-        </View>
-        <View className="flex-1 ml-4 justify-center">
-          <Text className="text-xs text-primary font-bold mb-1 uppercase">Printing</Text>
-          <Text className="text-text font-bold text-base mb-1" numberOfLines={2}>{item.name}</Text>
-          <Text className="text-text-muted text-xs mb-2">24h Turnaround</Text>
-          <Text className="text-text font-extrabold text-lg">Rp {item.base_price.toLocaleString('id-ID')}</Text>
-        </View>
-      </TouchableOpacity>
-      <View className="justify-between items-end">
-        <TouchableOpacity className="w-8 h-8 bg-surface rounded-full items-center justify-center border border-border">
-          <Heart size={16} color="#64748B" />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          onPress={() => handleQuickAdd(item)}
-          className="bg-primary px-4 py-2 rounded-full shadow-sm"
-        >
-          <Text className="text-white font-bold text-xs">Add</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 700, delay, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
 
   return (
-    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
-      {/* Sticky Header */}
-      <View className="px-6 py-4 bg-white shadow-sm shadow-black/5 z-10 border-b border-border">
-        <View className="flex-row justify-between items-center mb-4">
-          <View>
-            <Text className="text-text text-2xl font-black">Shop</Text>
-            <Text className="text-text-muted text-xs">Explore our premium materials</Text>
-          </View>
-          <View className="flex-row space-x-3">
-            <TouchableOpacity 
-              onPress={() => setIsGridMode(!isGridMode)}
-              className="w-10 h-10 bg-surface rounded-full items-center justify-center border border-border"
-            >
-              {isGridMode ? <ListIcon size={20} color="#0F172A" /> : <LayoutGrid size={20} color="#0F172A" />}
-            </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => bottomSheetRef.current?.expand()}
-              className="w-10 h-10 bg-surface rounded-full items-center justify-center border border-border relative"
-            >
-              <SlidersHorizontal size={20} color="#0F172A" />
-              {/* Badge for active filters */}
-              <View className="absolute top-0 right-0 w-3 h-3 bg-primary rounded-full border-2 border-white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Search Bar */}
-        <View className="flex-row items-center bg-surface rounded-full px-4 py-2 border border-border">
-          <Search size={18} color="#64748B" />
-          <TextInput 
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search for business cards, flyers..." 
-            placeholderTextColor="#94A3B8"
-            className="ml-2 flex-1 text-text py-1"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <X size={18} color="#64748B" />
-            </TouchableOpacity>
-          )}
+    <Animated.View style={{ opacity, width: '48%', marginBottom: 16 }}>
+      <View style={{ backgroundColor: '#fff', borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#f1f5f9' }}>
+        <View style={{ width: '100%', aspectRatio: 1, backgroundColor: '#e2e8f0' }} />
+        <View style={{ padding: 12 }}>
+          <View style={{ height: 10, backgroundColor: '#e2e8f0', borderRadius: 8, width: '40%', marginBottom: 8 }} />
+          <View style={{ height: 14, backgroundColor: '#e2e8f0', borderRadius: 8, width: '90%', marginBottom: 6 }} />
+          <View style={{ height: 14, backgroundColor: '#e2e8f0', borderRadius: 8, width: '70%', marginBottom: 10 }} />
+          <View style={{ height: 18, backgroundColor: '#e2e8f0', borderRadius: 8, width: '55%' }} />
         </View>
       </View>
+    </Animated.View>
+  );
+};
 
-      {/* Category Chips */}
-      <View className="bg-white pb-3 pt-3 border-b border-border shadow-sm shadow-black/5 z-10">
-        <FlatList 
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={CATEGORIES}
-          contentContainerStyle={{ paddingHorizontal: 20 }}
-          renderItem={({ item }) => (
-            <TouchableOpacity 
-              onPress={() => setActiveCategory(item)}
-              className={`px-5 py-2 rounded-full mr-2 ${activeCategory === item ? 'bg-primary' : 'bg-surface border border-border'}`}
-            >
-              <Text className={`font-bold text-sm ${activeCategory === item ? 'text-white' : 'text-text-muted'}`}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          )}
-          keyExtractor={(item) => item}
-        />
-        
-        {/* Results Meta */}
-        <View className="px-6 pt-3 flex-row items-center">
-          <Text className="text-text-muted text-xs font-bold">{filteredProducts.length} products found</Text>
-        </View>
-      </View>
+// Premium Product Card
+const ProductCard = ({ item, onPress, index }: { item: Product; onPress: () => void; index: number }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
-      {/* Product List */}
-      <FlatList
-        key={isGridMode ? 'grid' : 'list'} // Force re-render when switching layouts
-        data={filteredProducts}
-        numColumns={isGridMode ? 2 : 1}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
-        columnWrapperStyle={isGridMode ? { justifyContent: 'space-between' } : undefined}
-        renderItem={isGridMode ? renderProductGrid : renderProductList}
-        keyExtractor={(item) => item.id.toString()}
-        ListEmptyComponent={
-          <View className="items-center justify-center py-20">
-            <Text className="text-text text-lg font-bold mb-2">No products found</Text>
-            <Text className="text-text-muted text-center mb-6">Try adjusting your search or filters.</Text>
-            <TouchableOpacity onPress={() => setSearchQuery('')} className="bg-primary px-6 py-3 rounded-full">
-              <Text className="text-white font-bold">Clear Search</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      delay: index * 60,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
-      {/* Sort & Filter Bottom Sheet */}
-      <BottomSheet
-        ref={bottomSheetRef}
-        index={-1}
-        snapPoints={['60%']}
-        enablePanDownToClose
-        backgroundStyle={{ backgroundColor: '#ffffff', borderRadius: 32 }}
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start();
+  };
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
+  };
+
+  const imageUrl = item.image_url
+    ? item.image_url.startsWith('http')
+      ? item.image_url
+      : `http://localhost:8000${item.image_url}`
+    : null;
+
+  const categoryEmoji = CATEGORY_ICONS[item.category] || '🎨';
+
+  return (
+    <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }], width: '48%', marginBottom: 16 }}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={1}
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: 20,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: '#f1f5f9',
+          shadowColor: '#94a3b8',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.1,
+          shadowRadius: 12,
+          elevation: 3,
+        }}
       >
-        <BottomSheetView className="flex-1 px-6 pt-4 pb-10">
-          <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-xl font-bold text-text">Sort & Filter</Text>
-            <TouchableOpacity onPress={() => bottomSheetRef.current?.close()}>
-              <X size={24} color="#0F172A" />
+        {/* Image Section */}
+        <View style={{ width: '100%', aspectRatio: 1, backgroundColor: '#f8fafc', position: 'relative' }}>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          ) : (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9' }}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: '#e0e7ff', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+                <Package size={24} color="#6366f1" />
+              </View>
+              <Text style={{ fontSize: 10, color: '#94a3b8', fontWeight: '600' }}>NO IMAGE</Text>
+            </View>
+          )}
+
+          {/* Category Badge Overlay */}
+          <View style={{ position: 'absolute', top: 8, left: 8 }}>
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 20,
+              gap: 3,
+            }}>
+              <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700', letterSpacing: 0.4 }}>
+                {item.category || 'Produk'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Top-right: Sparkle badge */}
+          <View style={{ position: 'absolute', top: 8, right: 8 }}>
+            <View style={{ backgroundColor: '#fef3c7', width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }}>
+              <Sparkles size={12} color="#d97706" />
+            </View>
+          </View>
+        </View>
+
+        {/* Content */}
+        <View style={{ padding: 12 }}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a', lineHeight: 18, marginBottom: 4 }} numberOfLines={2}>
+            {item.name}
+          </Text>
+          <Text style={{ fontSize: 10, color: '#94a3b8', lineHeight: 14, marginBottom: 10 }} numberOfLines={1}>
+            {item.description || 'Kualitas cetak premium terbaik'}
+          </Text>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View>
+              <Text style={{ fontSize: 9, color: '#94a3b8', fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>
+                Mulai dari
+              </Text>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#2563eb' }}>
+                {new Intl.NumberFormat('id-ID', {
+                  style: 'currency',
+                  currency: 'IDR',
+                  minimumFractionDigits: 0,
+                }).format(item.base_price || 0)}
+              </Text>
+            </View>
+            <View style={{
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              backgroundColor: '#eff6ff',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Text style={{ color: '#2563eb', fontSize: 16, fontWeight: '700', marginTop: -1 }}>→</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+// Category Pill
+const CategoryPill = ({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scaleAnim, { toValue: 0.92, duration: 80, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        onPress={handlePress}
+        activeOpacity={0.85}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          borderRadius: 50,
+          marginRight: 8,
+          borderWidth: 1.5,
+          gap: 5,
+          backgroundColor: active ? '#2563eb' : '#fff',
+          borderColor: active ? '#2563eb' : '#e2e8f0',
+          shadowColor: active ? '#2563eb' : '#000',
+          shadowOffset: { width: 0, height: active ? 4 : 1 },
+          shadowOpacity: active ? 0.25 : 0.05,
+          shadowRadius: active ? 8 : 3,
+          elevation: active ? 4 : 1,
+        }}
+      >
+        <Text style={{
+          fontSize: 12,
+          fontWeight: '700',
+          color: active ? '#fff' : '#475569',
+          letterSpacing: 0.2,
+        }}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+export default function CatalogScreen() {
+  const navigation = useNavigation<CatalogScreenNavigationProp>();
+  const route = useRoute<any>();
+  const initialSearchQuery = route.params?.searchQuery || '';
+
+  const { products, categories, isLoading, fetchProducts, fetchCategories } = useProductStore();
+  const { totalItems, fetchCart } = useCartStore();
+
+  const [activeCategory, setActiveCategory] = useState('Semua');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  const headerFade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    fetchProducts();
+    fetchCategories();
+    fetchCart();
+    Animated.timing(headerFade, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+  }, [fetchProducts, fetchCategories, fetchCart]);
+
+  useEffect(() => {
+    if (route.params?.searchQuery) {
+      setSearchQuery(route.params.searchQuery);
+    }
+  }, [route.params?.searchQuery]);
+
+  const dynamicCategories = ['Semua', ...categories];
+
+  const filteredProducts = products
+    .filter((p) =>
+      activeCategory === 'Semua'
+        ? true
+        : p.category?.toLowerCase() === activeCategory.toLowerCase()
+    )
+    .filter((p) =>
+      searchQuery.trim() === ''
+        ? true
+        : p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          p.category?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+      <StatusBar barStyle="light-content" backgroundColor="#1e40af" />
+
+      {/* ── Premium Header ── */}
+      <Animated.View style={{ opacity: headerFade }}>
+        <View style={{
+          backgroundColor: '#1e40af',
+          paddingTop: 52,
+          paddingBottom: 0,
+          paddingHorizontal: 20,
+        }}>
+          {/* Top Row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <View>
+              <Text style={{ color: '#93c5fd', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>
+                JAYA MANDIRI DIGITAL
+              </Text>
+              <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: '800', marginTop: 2 }}>
+                Katalog Produk
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Cart' as any)}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.2)',
+              }}
+            >
+              <ShoppingCart size={20} color="#ffffff" />
+              {totalItems > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  backgroundColor: '#ef4444',
+                  width: 20,
+                  height: 20,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 2,
+                  borderColor: '#1e40af',
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{totalItems}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
 
-          <Text className="font-bold text-text mb-3">Sort By</Text>
-          <View className="flex-row flex-wrap mb-6">
-            {['Featured', 'Newest', 'Price L-H', 'Price H-L'].map((sort, i) => (
-              <TouchableOpacity 
-                key={i} 
-                onPress={() => setActiveSort(sort)}
-                className={`px-4 py-2 rounded-full border mr-2 mb-2 ${activeSort === sort ? 'bg-primary border-primary' : 'bg-surface border-border'}`}
-              >
-                <Text className={`text-sm font-bold ${activeSort === sort ? 'text-white' : 'text-text-muted'}`}>{sort}</Text>
+          {/* Search Bar */}
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#fff',
+            borderRadius: 16,
+            paddingHorizontal: 14,
+            paddingVertical: 11,
+            marginBottom: 20,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.12,
+            shadowRadius: 10,
+            elevation: 5,
+            borderWidth: isSearchFocused ? 2 : 1,
+            borderColor: isSearchFocused ? '#3b82f6' : 'transparent',
+          }}>
+            <Search size={17} color={isSearchFocused ? '#2563eb' : '#94a3b8'} />
+            <TextInput
+              style={{ outlineStyle: 'none', flex: 1, marginLeft: 10, color: '#1e293b', fontSize: 14, fontWeight: '500' } as any}
+              placeholder="Cari banner, brosur, sticker..."
+              placeholderTextColor="#a1a1aa"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <View style={{ width: 22, height: 22, backgroundColor: '#e2e8f0', borderRadius: 11, alignItems: 'center', justifyContent: 'center' }}>
+                  <X size={12} color="#64748b" />
+                </View>
               </TouchableOpacity>
-            ))}
+            )}
           </View>
+        </View>
 
-          <Text className="font-bold text-text mb-3">Price Range</Text>
-          <View className="flex-row flex-wrap mb-6">
-            {['Any', '<$15', '$15–$30', '$30–$50', '$50+'].map((price, i) => (
-              <TouchableOpacity key={i} className={`px-4 py-2 rounded-full border mr-2 mb-2 ${i === 0 ? 'bg-primary border-primary' : 'bg-surface border-border'}`}>
-                <Text className={`text-sm font-bold ${i === 0 ? 'text-white' : 'text-text-muted'}`}>{price}</Text>
-              </TouchableOpacity>
-            ))}
+        {/* Rounded bottom cap for header */}
+        <View style={{
+          backgroundColor: '#1e40af',
+          height: 20,
+          borderBottomLeftRadius: 28,
+          borderBottomRightRadius: 28,
+          marginBottom: -1,
+        }} />
+      </Animated.View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ── Category Filter ── */}
+        <View style={{ paddingTop: 16, paddingBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 10 }}>
+            <Tag size={13} color="#64748b" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', marginLeft: 5, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+              Filter Kategori
+            </Text>
           </View>
-
-          <TouchableOpacity 
-            onPress={() => bottomSheetRef.current?.close()}
-            className="w-full bg-primary py-4 rounded-full items-center mt-auto shadow-lg shadow-primary/30"
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 20 }}
           >
-            <Text className="text-white font-bold text-lg">Apply Filters</Text>
-          </TouchableOpacity>
-        </BottomSheetView>
-      </BottomSheet>
-    </SafeAreaView>
+            {dynamicCategories.map((cat) => (
+              <CategoryPill
+                key={cat}
+                label={cat}
+                active={activeCategory === cat}
+                onPress={() => setActiveCategory(cat)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* ── Results Info Bar ── */}
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+          marginBottom: 4,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' }} />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569' }}>
+              {filteredProducts.length} Produk Tersedia
+            </Text>
+          </View>
+          {activeCategory !== 'Semua' && (
+            <TouchableOpacity onPress={() => setActiveCategory('Semua')}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 }}>
+                <Text style={{ fontSize: 11, color: '#2563eb', fontWeight: '700', marginRight: 4 }}>Reset</Text>
+                <X size={10} color="#2563eb" />
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* ── Product Grid ── */}
+        <View style={{ paddingHorizontal: 16 }}>
+          {isLoading ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonCard key={i} delay={i * 100} />
+              ))}
+            </View>
+          ) : filteredProducts.length === 0 ? (
+            /* Empty State */
+            <View style={{
+              backgroundColor: '#fff',
+              borderRadius: 24,
+              padding: 36,
+              alignItems: 'center',
+              borderWidth: 1,
+              borderColor: '#f1f5f9',
+              marginTop: 20,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.05,
+              shadowRadius: 8,
+              elevation: 2,
+            }}>
+              <View style={{ width: 80, height: 80, backgroundColor: '#f1f5f9', borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                <Search size={34} color="#cbd5e1" />
+              </View>
+              <Text style={{ fontWeight: '800', color: '#334155', fontSize: 16, marginBottom: 6 }}>
+                Produk Tidak Ditemukan
+              </Text>
+              <Text style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', lineHeight: 20, maxWidth: 220 }}>
+                {searchQuery
+                  ? `Tidak ada produk untuk "${searchQuery}". Coba kata kunci lain.`
+                  : `Tidak ada produk dalam kategori "${activeCategory}".`}
+              </Text>
+              <TouchableOpacity
+                onPress={() => { setSearchQuery(''); setActiveCategory('Semua'); }}
+                style={{
+                  marginTop: 20,
+                  backgroundColor: '#2563eb',
+                  paddingHorizontal: 24,
+                  paddingVertical: 12,
+                  borderRadius: 50,
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Lihat Semua Produk</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              {filteredProducts.map((item, index) => (
+                <ProductCard
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  onPress={() => (navigation as any).navigate('ProductDetail', { productId: item.id })}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 }

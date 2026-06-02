@@ -2,6 +2,12 @@ package product
 
 import "time"
 
+// Category mencerminkan tabel categories di PostgreSQL
+type Category struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // ProductVariant mencerminkan tabel product_variants di PostgreSQL
 type ProductVariant struct {
 	ID            int        `json:"id"`
@@ -21,6 +27,7 @@ type ProductVariant struct {
 type Product struct {
 	ID            int              `json:"id"`
 	CategoryID    *int             `json:"category_id"` // Menggunakan pointer karena category_id bisa NULL [cite: 1259 16548]
+	CategoryName  string           `json:"category"`    // Nama Kategori dari tabel categories
 	Name          string           `json:"name"`
 	Description   string           `json:"description"`
 	BasePrice     float64          `json:"base_price"`     // numeric(12,2) di DB dipetakan ke float64 [cite: 1259 16548]
@@ -38,7 +45,7 @@ type ProductVariantRequest struct {
 	ID            int     `json:"id"` // Jika > 0 berarti update varian lama, jika 0 berarti varian baru
 	SKU           string  `json:"sku" binding:"required"`
 	VariantName   string  `json:"variant_name" binding:"required"`
-	Price         float64 `json:"price" binding:"required"`
+	Price         float64 `json:"price"`
 	Stock         int     `json:"stock"`
 	IsActive      *bool   `json:"is_active" binding:"required"`
 	MaterialID    *int    `json:"material_id"`
@@ -50,7 +57,7 @@ type ProductRequest struct {
 	CategoryID    *int                    `json:"category_id"`
 	Name          string                  `json:"name" binding:"required"`
 	Description   string                  `json:"description"`
-	BasePrice     float64                 `json:"base_price" binding:"required"`
+	BasePrice     float64                 `json:"base_price"`
 	EstimatedDays int                     `json:"estimated_days"`
 	IsActive      *bool                   `json:"is_active" binding:"required"`
 	Variants      []ProductVariantRequest `json:"variants" binding:"required,dive"`

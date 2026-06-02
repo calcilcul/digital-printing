@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -92,7 +93,7 @@ func (u *OrderUsecase) Checkout(ctx context.Context, userID int, ip, ua string) 
 // =========================================================================
 // CANCEL ORDER
 // =========================================================================
-func (u *OrderUsecase) Cancel(ctx context.Context, orderID int, userID int, ip, ua string) error {
+func (u *OrderUsecase) Cancel(ctx context.Context, orderID int, userID int, reason, ip, ua string) error {
 	o, err := u.repo.FindByID(ctx, orderID)
 	if err != nil {
 		return err
@@ -108,15 +109,18 @@ func (u *OrderUsecase) Cancel(ctx context.Context, orderID int, userID int, ip, 
 
 	// Validasi status — boleh cancel sebelum masuk cetak
 	cancellableStatuses := map[string]bool{
-		"pending_design": true, "design_uploaded": true,
-		"payment_verification": true, "payment_rejected": true,
-		"design_review": true, "revision_requested": true,
+		"waiting_payment": true, "payment_verification": true, "payment_rejected": true,
+		"pending_design": true, "design_uploaded": true, "design_review": true,
+		"revision_requested": true,
 	}
 	if !cancellableStatuses[o.Status] {
 		return errors.New("pesanan tidak dapat dibatalkan karena sudah dalam proses cetak")
 	}
 
-	if err := u.repo.Cancel(ctx, orderID, userID); err != nil {
+	if reason == "" {
+		reason = "Dibatalkan oleh customer"
+	}
+	if err := u.repo.Cancel(ctx, orderID, userID, reason); err != nil {
 		return err
 	}
 
@@ -248,34 +252,94 @@ func (u *OrderUsecase) ReuploadPayment(ctx context.Context, orderID int, userID 
 // STAFF: APPROVE PAYMENT
 // =========================================================================
 func (u *OrderUsecase) ApprovePayment(ctx context.Context, orderID int, staffID int) error {
-	return u.repo.ApprovePayment(ctx, orderID, staffID)
+	err := u.repo.ApprovePayment(ctx, orderID, staffID)
+	if err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"event":    "payment_approved",
+		"title":    "Pembayaran Disetujui",
+		"message":  fmt.Sprintf("Pembayaran untuk order #%d telah disetujui", orderID),
+		"order_id": orderID,
+	}
+	jsonStr, _ := json.Marshal(payload)
+	u.wsHub.BroadcastNotification(string(jsonStr))
+	return nil
 }
 
 // =========================================================================
 // STAFF: REJECT PAYMENT
 // =========================================================================
 func (u *OrderUsecase) RejectPayment(ctx context.Context, orderID int, staffID int, reason string) error {
-	return u.repo.RejectPayment(ctx, orderID, staffID, reason)
+	err := u.repo.RejectPayment(ctx, orderID, staffID, reason)
+	if err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"event":    "payment_rejected",
+		"title":    "Pembayaran Ditolak",
+		"message":  reason,
+		"order_id": orderID,
+	}
+	jsonStr, _ := json.Marshal(payload)
+	u.wsHub.BroadcastNotification(string(jsonStr))
+	return nil
 }
 
 // =========================================================================
 // STAFF: APPROVE DESIGN
 // =========================================================================
 func (u *OrderUsecase) ApproveDesign(ctx context.Context, orderID int, staffID int) error {
-	return u.repo.ApproveDesign(ctx, orderID, staffID)
+	err := u.repo.ApproveDesign(ctx, orderID, staffID)
+	if err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"event":    "design_approved",
+		"title":    "Desain Disetujui",
+		"message":  fmt.Sprintf("Desain untuk order #%d telah disetujui", orderID),
+		"order_id": orderID,
+	}
+	jsonStr, _ := json.Marshal(payload)
+	u.wsHub.BroadcastNotification(string(jsonStr))
+	return nil
 }
 
 // =========================================================================
 // STAFF: REQUEST REVISION
 // =========================================================================
 func (u *OrderUsecase) RequestRevision(ctx context.Context, orderID int, staffID int, notes string) error {
-	return u.repo.RequestRevision(ctx, orderID, staffID, notes)
+	err := u.repo.RequestRevision(ctx, orderID, staffID, notes)
+	if err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"event":    "design_revision",
+		"title":    "Desain Perlu Direvisi",
+		"message":  notes,
+		"order_id": orderID,
+	}
+	jsonStr, _ := json.Marshal(payload)
+	u.wsHub.BroadcastNotification(string(jsonStr))
+	return nil
 }
 
 // =========================================================================
 // STAFF: FINISH PRINTING
 // =========================================================================
 func (u *OrderUsecase) FinishPrinting(ctx context.Context, orderID int, staffID int) error {
-	return u.repo.FinishPrinting(ctx, orderID, staffID)
+	err := u.repo.FinishPrinting(ctx, orderID, staffID)
+	if err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"event":    "order_ready",
+		"title":    "Pesanan Siap Diambil",
+		"message":  fmt.Sprintf("Pesanan #%d selesai dicetak dan siap diambil", orderID),
+		"order_id": orderID,
+	}
+	jsonStr, _ := json.Marshal(payload)
+	u.wsHub.BroadcastNotification(string(jsonStr))
+	return nil
 }
 

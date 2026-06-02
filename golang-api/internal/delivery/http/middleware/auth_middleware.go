@@ -17,13 +17,18 @@ func AuthMiddleware(userRepo user.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		var tokenString string
+		if authHeader != "" {
+			tokenString = strings.Replace(authHeader, "Bearer ", "", 1)
+		} else {
+			tokenString = c.Query("token")
+		}
+
+		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "missing token"})
 			c.Abort()
 			return
 		}
-
-		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
 
 		// Coba parse token tanpa verifikasi signature dulu untuk melihat isi claims (menentukan jenis token)
 		parsedToken, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
@@ -121,13 +126,13 @@ func AuthMiddleware(userRepo user.Repository) gin.HandlerFunc {
 		var roleStr string
 		switch u.RoleID {
 		case 1:
-			roleStr = "Manager"
+			roleStr = "owner"
 		case 2:
-			roleStr = "Staff"
+			roleStr = "staff"
 		case 3:
-			roleStr = "Customer"
+			roleStr = "customer"
 		default:
-			roleStr = "Customer"
+			roleStr = "customer"
 		}
 
 		// Set ke context agar bisa diakses handler

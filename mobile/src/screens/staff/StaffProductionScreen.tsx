@@ -1,225 +1,248 @@
-import React, { useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
-import { useStaffStore } from '../../store/staffStore';
-import { Printer, PackageCheck, Clock, ChevronRight, CheckCircle2 } from 'lucide-react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Printer, Clock, CheckCircle, Play } from 'lucide-react-native';
+
+import { useStaffStore, StaffOrder } from '../../store/staffStore';
+import { staffApi } from '../../api/staffApi';
+import { StaffStackParamList } from '../../navigation/StaffTabs';
+
+type NavigationProp = NativeStackNavigationProp<StaffStackParamList, 'Tabs'>;
 
 export default function StaffProductionScreen() {
-  const navigation = useNavigation<any>();
-  const isFocused = useIsFocused();
+  const navigation = useNavigation<NavigationProp>();
   const { orders, isLoading, fetchOrders } = useStaffStore();
+  
+  const [actionLoading, setActionLoading] = useState(false);
+  const [finishModalVisible, setFinishModalVisible] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [prodNotes, setProdNotes] = useState('');
+
+  // Timer Tick State (re-render every 60 seconds)
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (isFocused) fetchOrders();
-  }, [isFocused]);
+    const interval = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const printingOrders = orders.filter((o) => o.status === 'printing');
-  const readyOrders = orders.filter((o) => o.status === 'ready');
-  const productionOrders = [...printingOrders, ...readyOrders];
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [fetchOrders])
+  );
 
-  const formatTime = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffH = Math.floor(diffMs / 3600000);
-    const diffM = Math.floor((diffMs % 3600000) / 60000);
-    if (diffH > 24) return `${Math.floor(diffH / 24)} hari lalu`;
-    if (diffH > 0) return `${diffH} jam lalu`;
-    return `${diffM} menit lalu`;
+  const printingOrders = useMemo(() => {
+    return orders
+      .filter(o => o.status === 'printing')
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  }, [orders]);
+
+  const handleStartProduction = (orderId: number) => {
+    Alert.alert('Konfirmasi', 'Mulai proses cetak untuk order ini?', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Mulai Cetak', onPress: async () => {
+        setActionLoading(true);
+        try {
+          await staffApi.startProduction(orderId);
+          await fetchOrders();
+          Alert.alert('Sukses', 'Produksi dimulai!');
+        } catch (e: any) {
+          Alert.alert('Info', e.response?.data?.message || 'Gagal memulai produksi (mungkin sudah dimulai)');
+        } finally {
+          setActionLoading(false);
+        }
+      }}
+    ]);
+  };
+
+  const handleFinishProduction = async () => {
+    if (!selectedOrderId) return;
+    setActionLoading(true);
+    try {
+      await staffApi.finishProduction(selectedOrderId, prodNotes);
+      setFinishModalVisible(false);
+      setSelectedOrderId(null);
+      setProdNotes('');
+      await fetchOrders();
+      Alert.alert('Sukses', 'Produksi selesai! Customer dinotifikasi.');
+    } catch (e: any) {
+      Alert.alert('Error', e.response?.data?.message || 'Gagal menyelesaikan produksi');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const getElapsed = (startTime: string) => {
+    const diff = Date.now() - new Date(startTime).getTime();
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    if (hours > 0) return `${hours} jam ${minutes} menit`;
+    return `${minutes} menit`;
+  };
+
+  const getQueueTime = (item: StaffOrder) => {
+    const log = item.status_logs?.find((l: any) => l.status === 'printing');
+    const timeStart = log ? new Date(log.created_at).getTime() : new Date(item.created_at).getTime();
+    const diff = Date.now() - timeStart;
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    if (hours > 0) return `${hours} jam ${minutes} menit`;
+    return `${minutes} menit`;
+  };
+
+  const renderItem = ({ item }: { item: StaffOrder }) => {
+    const productionLog = item.production_logs?.[0];
+    const hasStarted = !!productionLog?.start_time;
+    const hasFinished = !!productionLog?.end_time;
+    
+    return (
+      <View 
+        className={
+          hasStarted 
+            ? "bg-white p-5 rounded-2xl mb-4 border border-slate-100 border-l-4 border-l-blue-600 shadow-sm"
+            : "bg-white p-5 rounded-2xl mb-4 border border-slate-100 border-l-4 border-l-amber-500 shadow-sm"
+        }
+      >
+        <TouchableOpacity onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}>
+          {/* Header row: order_code + status badge */}
+          <View className="flex-row justify-between items-center mb-3">
+            <Text className="font-bold text-slate-800 text-lg">{item.order_code}</Text>
+            {hasStarted ? (
+              <View style={{ backgroundColor: '#1A56E8', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Sedang Dicetak</Text>
+              </View>
+            ) : (
+              <View style={{ backgroundColor: '#FAEEDA', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                <Text style={{ color: '#633806', fontSize: 11, fontWeight: '700' }}>Menunggu Mulai</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Info: customer name */}
+          <View className="mb-3">
+            <Text className="text-slate-500 text-xs uppercase font-bold tracking-wider">Customer</Text>
+            <Text className="text-slate-800 text-base font-semibold mt-0.5">
+              {item.customer_name || item.user?.name || 'Customer'}
+            </Text>
+          </View>
+
+          {/* Info: products list */}
+          <View className="bg-slate-50 p-3 rounded-xl mb-4 border border-slate-100/50">
+            <Text className="text-slate-400 text-[10px] uppercase font-bold tracking-wider mb-1.5">Daftar Cetak</Text>
+            {item.items.map((prod: any, idx: number) => (
+              <View key={idx} className="flex-row justify-between items-center mb-1">
+                <Text className="text-slate-700 text-sm flex-1">{prod.product_name} - {prod.variant_name}</Text>
+                <Text className="font-bold text-slate-900 ml-2">{prod.quantity}x</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Time indicator (Green badge for printing duration, Amber for queue time) */}
+          <View className="mb-4">
+            {hasStarted ? (
+              <View className="flex-row items-center bg-green-50 p-2.5 rounded-xl border border-green-100">
+                <Clock color="#16a34a" size={16} />
+                <Text className="text-green-700 text-sm font-semibold ml-2">
+                  Sudah {getElapsed(productionLog.start_time)}
+                </Text>
+              </View>
+            ) : (
+              <View className="flex-row items-center bg-amber-50 p-2.5 rounded-xl border border-amber-100">
+                <Clock color="#d97706" size={16} />
+                <Text className="text-amber-700 text-sm font-semibold ml-2">
+                  Antri sejak {getQueueTime(item)} lalu
+                </Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Full-width single conditional button */}
+        <View className="mt-1">
+          {!hasStarted && (
+            <TouchableOpacity 
+              className="w-full bg-blue-600 py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"
+              onPress={() => handleStartProduction(item.id)}
+              disabled={actionLoading}
+            >
+              <Play color="white" size={18} />
+              <Text className="text-white font-bold text-base ml-2">Mulai Cetak</Text>
+            </TouchableOpacity>
+          )}
+          {hasStarted && !hasFinished && (
+            <TouchableOpacity 
+              className="w-full bg-green-600 py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"
+              onPress={() => { setSelectedOrderId(item.id); setFinishModalVisible(true); }}
+              disabled={actionLoading}
+            >
+              <CheckCircle color="white" size={18} />
+              <Text className="text-white font-bold text-base ml-2">Tandai Selesai</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-      {/* HEADER */}
-      <View style={{ backgroundColor: '#065F46', paddingHorizontal: 24, paddingTop: 18, paddingBottom: 20 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-          <View style={{ width: 40, height: 40, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}>
-            <Printer size={20} color="white" />
-          </View>
-          <View>
-            <Text style={{ color: 'white', fontWeight: '900', fontSize: 18 }}>Antrean Cetak & Produksi</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12 }}>Pantau mesin cetak dan serah terima pesanan</Text>
-          </View>
+    <View className="flex-1 bg-slate-50 pt-12">
+      <View className="px-5 mb-4 border-b border-slate-200 pb-4">
+        <View className="flex-row items-center">
+          <Printer color="#1A56E8" size={28} />
+          <Text className="text-2xl font-bold text-slate-800 ml-2">Antrian Produksi</Text>
         </View>
-
-        {/* Mini stats */}
-        <View style={{ marginTop: 12, flexDirection: 'row', gap: 8 }}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Printer size={18} color="rgba(255,255,255,0.9)" />
-            <View>
-              <Text style={{ color: 'white', fontWeight: '900', fontSize: 20 }}>{printingOrders.length}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: '600' }}>Sedang Cetak</Text>
-            </View>
-          </View>
-          <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <PackageCheck size={18} color="rgba(255,255,255,0.9)" />
-            <View>
-              <Text style={{ color: 'white', fontWeight: '900', fontSize: 20 }}>{readyOrders.length}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: '600' }}>Siap Diambil</Text>
-            </View>
-          </View>
-        </View>
+        <Text className="text-slate-500 mt-1">{printingOrders.length} pesanan aktif</Text>
       </View>
 
-      {isLoading && orders.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color="#065F46" />
-          <Text style={{ color: '#6B7280', fontSize: 13, marginTop: 12 }}>Memuat antrean produksi...</Text>
-        </View>
-      ) : (
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={fetchOrders} colors={['#065F46']} />}
-        >
-          {/* PRINTING section */}
-          {printingOrders.length > 0 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, marginLeft: 4 }}>
-                <Printer size={14} color="#065F46" />
-                <Text style={{ fontWeight: '800', color: '#065F46', fontSize: 13 }}>Sedang Dicetak ({printingOrders.length})</Text>
-              </View>
-              {printingOrders.map((order) => (
-                <TouchableOpacity
-                  key={order.id}
-                  onPress={() => navigation.navigate('StaffVerification', { orderId: order.id })}
-                  activeOpacity={0.75}
-                  style={{
-                    backgroundColor: 'white',
-                    borderRadius: 20,
-                    marginBottom: 12,
-                    borderWidth: 1,
-                    borderColor: '#A7F3D0',
-                    shadowColor: '#065F46',
-                    shadowOpacity: 0.1,
-                    shadowRadius: 10,
-                    shadowOffset: { width: 0, height: 4 },
-                    elevation: 4,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <View style={{ height: 3, backgroundColor: '#10B981' }} />
-                  <View style={{ padding: 16 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={{ width: 34, height: 34, backgroundColor: '#ECFDF5', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
-                          <Printer size={16} color="#065F46" />
-                        </View>
-                        <View>
-                          <Text style={{ fontWeight: '900', color: '#1F2937', fontSize: 14 }}>{order.order_code}</Text>
-                          <View style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, borderRadius: 20, paddingHorizontal: 7, paddingVertical: 1, marginTop: 3 }}>
-                            <Text style={{ fontSize: 8, fontWeight: '800', color: '#065F46' }}>🖨️ SEDANG DICETAK</Text>
-                          </View>
-                        </View>
-                      </View>
-                      <ChevronRight size={16} color="#9CA3AF" />
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                      <View>
-                        <Text style={{ color: '#9CA3AF', fontSize: 11, marginBottom: 2 }}>Pelanggan</Text>
-                        <Text style={{ color: '#374151', fontWeight: '700', fontSize: 14 }}>{order.user_name || 'Customer'}</Text>
-                      </View>
-                      <Text style={{ color: '#1E40AF', fontWeight: '900', fontSize: 16 }}>
-                        Rp {order.total_price?.toLocaleString('id-ID') || 0}
-                      </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Clock size={12} color="#9CA3AF" />
-                        <Text style={{ color: '#9CA3AF', fontSize: 11 }}>{formatTime(order.created_at)}</Text>
-                      </View>
-                      <View style={{ backgroundColor: '#065F46', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 7 }}>
-                        <Text style={{ color: 'white', fontSize: 11, fontWeight: '800' }}>Selesaikan Cetak →</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </>
-          )}
+      <FlatList
+        data={printingOrders}
+        keyExtractor={item => item.id.toString()}
+        renderItem={renderItem}
+        contentContainerStyle={{ padding: 20, paddingBottom: 80 }}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={fetchOrders} />}
+        ListEmptyComponent={
+          <View className="items-center justify-center mt-20">
+            <Printer color="#cbd5e1" size={64} />
+            <Text className="text-slate-500 text-lg font-medium mt-4">Tidak ada pesanan di antrian cetak</Text>
+            <Text className="text-slate-400">Semua berjalan lancar! 🎉</Text>
+          </View>
+        }
+      />
 
-          {/* READY section */}
-          {readyOrders.length > 0 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: printingOrders.length > 0 ? 8 : 0, marginLeft: 4 }}>
-                <PackageCheck size={14} color="#15803D" />
-                <Text style={{ fontWeight: '800', color: '#15803D', fontSize: 13 }}>Siap Diambil ({readyOrders.length})</Text>
-              </View>
-              {readyOrders.map((order) => (
-                <TouchableOpacity
-                  key={order.id}
-                  onPress={() => navigation.navigate('StaffVerification', { orderId: order.id })}
-                  activeOpacity={0.75}
-                  style={{
-                    backgroundColor: 'white',
-                    borderRadius: 20,
-                    marginBottom: 12,
-                    borderWidth: 1,
-                    borderColor: '#BBF7D0',
-                    shadowColor: '#15803D',
-                    shadowOpacity: 0.08,
-                    shadowRadius: 8,
-                    shadowOffset: { width: 0, height: 3 },
-                    elevation: 3,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <View style={{ height: 3, backgroundColor: '#22C55E' }} />
-                  <View style={{ padding: 16 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={{ width: 34, height: 34, backgroundColor: '#F0FDF4', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
-                          <PackageCheck size={16} color="#15803D" />
-                        </View>
-                        <View>
-                          <Text style={{ fontWeight: '900', color: '#1F2937', fontSize: 14 }}>{order.order_code}</Text>
-                          <View style={{ backgroundColor: '#F0FDF4', borderColor: '#BBF7D0', borderWidth: 1, borderRadius: 20, paddingHorizontal: 7, paddingVertical: 1, marginTop: 3 }}>
-                            <Text style={{ fontSize: 8, fontWeight: '800', color: '#15803D' }}>📦 SIAP DIAMBIL</Text>
-                          </View>
-                        </View>
-                      </View>
-                      <ChevronRight size={16} color="#9CA3AF" />
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                      <View>
-                        <Text style={{ color: '#9CA3AF', fontSize: 11, marginBottom: 2 }}>Pelanggan</Text>
-                        <Text style={{ color: '#374151', fontWeight: '700', fontSize: 14 }}>{order.user_name || 'Customer'}</Text>
-                      </View>
-                      <Text style={{ color: '#1E40AF', fontWeight: '900', fontSize: 16 }}>
-                        Rp {order.total_price?.toLocaleString('id-ID') || 0}
-                      </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Clock size={12} color="#9CA3AF" />
-                        <Text style={{ color: '#9CA3AF', fontSize: 11 }}>{formatTime(order.created_at)}</Text>
-                      </View>
-                      <View style={{ backgroundColor: '#15803D', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 7 }}>
-                        <Text style={{ color: 'white', fontSize: 11, fontWeight: '800' }}>Serahkan ke Customer →</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </>
-          )}
-
-          {productionOrders.length === 0 && (
-            <View style={{ backgroundColor: 'white', borderRadius: 28, padding: 48, alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', marginTop: 24 }}>
-              <View style={{ width: 72, height: 72, backgroundColor: '#ECFDF5', borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                <CheckCircle2 size={36} color="#10B981" />
-              </View>
-              <Text style={{ fontWeight: '900', color: '#1F2937', fontSize: 16, marginBottom: 6 }}>Antrean Produksi Kosong</Text>
-              <Text style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
-                Tidak ada pesanan yang sedang dicetak atau menunggu diambil. Semua bersih!
-              </Text>
+      {/* Finish Production Modal */}
+      <Modal visible={finishModalVisible} transparent={true} animationType="slide">
+        <View className="flex-1 bg-black/50 justify-center items-end p-0">
+          <View className="bg-white w-full rounded-t-3xl p-6 h-auto">
+            <Text className="text-xl font-bold text-slate-800 mb-2">Selesaikan Pesanan?</Text>
+            <Text className="text-slate-500 mb-4">Customer akan mendapatkan notifikasi bahwa pesanannya sudah siap diambil.</Text>
+            
+            <TextInput
+              className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 mb-6"
+              placeholder="Catatan opsional (misal: bungkus rapi)"
+              multiline
+              numberOfLines={3}
+              value={prodNotes}
+              onChangeText={setProdNotes}
+              textAlignVertical="top"
+            />
+            
+            <View className="flex-row justify-end">
+              <TouchableOpacity className="flex-1 mr-2 py-3 bg-slate-200 rounded-xl items-center" onPress={() => setFinishModalVisible(false)}>
+                <Text className="text-slate-600 font-bold">Batal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                className="flex-1 ml-2 py-3 bg-green-600 rounded-xl items-center"
+                onPress={handleFinishProduction}
+                disabled={actionLoading}
+              >
+                {actionLoading ? <ActivityIndicator size="small" color="white" /> : <Text className="text-white font-bold">Tandai Selesai</Text>}
+              </TouchableOpacity>
             </View>
-          )}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }

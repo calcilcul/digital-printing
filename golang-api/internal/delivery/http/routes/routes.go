@@ -55,6 +55,7 @@ func SetupRoutes(
 	// PUBLIC ROUTES
 	// ========================
 	r.GET("/products", productHandler.GetAll)
+	r.GET("/categories", productHandler.GetCategories)
 
 	// ========================
 	// PROTECTED ROUTES (JWT REQUIRED)
@@ -126,6 +127,7 @@ func SetupRoutes(
 		// Upload & Reupload Bukti Bayar
 		api.POST("/orders/:id/payment", orderHandler.UploadPayment)
 		api.POST("/orders/:id/payment/reupload", orderHandler.ReuploadPayment)
+		api.POST("/payments", paymentHandler.Upload) // multipart: order_id, payment_proof, amount, ...
 
 		// ========================
 		// OWNER / ADMIN ROUTES
@@ -137,7 +139,9 @@ func SetupRoutes(
 			admin.POST("/staff", authHandler.RegisterStaff)
 
 			// 🔥 Product Management (Admin/Owner)
+			admin.GET("/products", productHandler.GetAllForAdmin)
 			admin.POST("/products", productHandler.Create)
+			admin.POST("/products/:id/image", productHandler.UploadImage)
 			admin.PUT("/products/:id", productHandler.Update)
 			admin.DELETE("/products/:id", productHandler.Delete)
 

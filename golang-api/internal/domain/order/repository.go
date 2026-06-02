@@ -62,7 +62,7 @@ type Repository interface {
 
 	FindDetailByID(ctx context.Context, orderID int) (*OrderDetail, error)
 
-	Cancel(ctx context.Context, orderID int, userID int) error
+	Cancel(ctx context.Context, orderID int, userID int, reason string) error
 
 	UpdateStatus(ctx context.Context, orderID int, status string, changedBy int, notes string) error
 

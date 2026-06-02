@@ -49,11 +49,11 @@ func (r *productionRepository) StartProduction(ctx context.Context, orderID int,
 		return errors.New("produksi tidak dapat dimulai: masih ada item pesanan yang desainnya belum disetujui oleh staf")
 	}
 
-	// 1. Update status order menjadi 'printing' (Hanya bisa jika status 'paid')
+	// 1. Update status order menjadi 'printing' (Hanya bisa jika status 'paid' atau 'printing')
 	res, err := tx.ExecContext(ctx, `
 		UPDATE orders 
 		SET status = 'printing', updated_at = $1 
-		WHERE id = $2 AND status = 'paid'`,
+		WHERE id = $2 AND (status = 'paid' OR status = 'printing')`,
 		time.Now(), orderID)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (r *productionRepository) StartProduction(ctx context.Context, orderID int,
 
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		return errors.New("pesanan tidak ditemukan atau belum lunas")
+		return errors.New("pesanan tidak ditemukan, belum lunas, atau sudah diproses")
 	}
 
 	// 2. Insert ke tabel production_logs

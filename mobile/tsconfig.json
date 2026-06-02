@@ -1,6 +1,20 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    "types": [
+      "nativewind/types"
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "app.d.ts",
+    "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".expo",
+    "babel.config.js"
+  ]
 }

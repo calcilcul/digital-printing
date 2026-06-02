@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"golang-api/internal/domain/product"
 	"golang-api/internal/usecase"
@@ -18,29 +21,7 @@ func NewProductHandler(u *usecase.ProductUsecase) *ProductHandler {
 	return &ProductHandler{u}
 }
 
-// productImageMap maps product ID ke URL gambar Unsplash
-// Ini workaround sementara karena kolom image_url belum ada di DB Railway
-var productImageMap = map[int]string{
-	1:  "https://images.unsplash.com/photo-1598301257982-0cf014dff316?w=800&q=80",  // Banner umum
-	2:  "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800&q=80",  // Poster
-	4:  "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=800&q=80",     // Brosur
-	10: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=800&q=80",     // Spanduk Flexi
-	11: "https://images.unsplash.com/photo-1586281380349-632531db7ed4?w=800&q=80",  // X-Banner
-	12: "https://images.unsplash.com/photo-1569017388730-020b5f80a004?w=800&q=80",  // Roll Up Banner
-	13: "https://images.unsplash.com/photo-1612538498456-e861df91d4d0?w=800&q=80",  // Stiker Vinyl
-	14: "https://images.unsplash.com/photo-1559163499-413811fb2344?w=800&q=80",     // Label Kemasan
-	15: "https://images.unsplash.com/photo-1606836576983-8b458e75221d?w=800&q=80",  // Kartu Nama Art Carton
-	16: "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=800&q=80",  // Kartu Nama Linen
-	17: "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=800&q=80",     // Brosur A4
-	18: "https://images.unsplash.com/photo-1572883454114-1cf0031ede2a?w=800&q=80",  // Flyer A5
-	19: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800&q=80",  // Poster UV
-	20: "https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?w=800&q=80",  // Mug
-	21: "https://images.unsplash.com/photo-1618354691373-d851c5c3a990?w=800&q=80",  // Kaos
-	22: "https://images.unsplash.com/photo-1591378603223-e15b45a81640?w=800&q=80",  // Tote Bag
-	23: "https://images.unsplash.com/photo-1586281380117-5a60ae2050cc?w=800&q=80",  // Stempel
-	24: "https://images.unsplash.com/photo-1519741497674-611481863552?w=800&q=80",  // Undangan Hard Cover
-	25: "https://images.unsplash.com/photo-1520854221256-17451cc331bf?w=800&q=80",  // Undangan Digital
-}
+// productImageMap removed as requested by user.
 
 // ========================
 // GET ALL PRODUCTS
@@ -55,17 +36,40 @@ func (h *ProductHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	// Inject image_url dari map jika kolom belum ada di DB
+	// Remove dummy Unsplash image injection
 	for i := range products {
 		if products[i].ImageURL == "" {
-			if url, ok := productImageMap[products[i].ID]; ok {
-				products[i].ImageURL = url
-			}
+			// Leave it empty or map a generic placeholder if needed.
+			// The frontend will handle empty image_urls.
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success get products",
+		"data":    products,
+	})
+}
+
+// ========================
+// GET ALL PRODUCTS FOR ADMIN
+// ========================
+func (h *ProductHandler) GetAllForAdmin(c *gin.Context) {
+
+	products, err := h.usecase.GetAllForAdmin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": err.Error(),
+		})
+		return
+	}
+
+	for i := range products {
+		if products[i].ImageURL == "" {
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success get products for admin",
 		"data":    products,
 	})
 }
@@ -80,12 +84,56 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if err := h.usecase.Create(req); err != nil {
+	productID, err := h.usecase.Create(req)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "success create product"})
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "success create product",
+		"product_id": productID,
+	})
+}
+
+// ========================
+// UPLOAD PRODUCT IMAGE
+// ========================
+func (h *ProductHandler) UploadImage(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid product id"})
+		return
+	}
+
+	file, err := c.FormFile("image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "image is required"})
+		return
+	}
+
+	ext := filepath.Ext(file.Filename)
+	filename := fmt.Sprintf("product_%d_%d%s", id, time.Now().Unix(), ext)
+	savePath := filepath.Join("uploads", "products", filename)
+	dbPath := "/uploads/products/" + filename
+
+	// Save file locally
+	if err := c.SaveUploadedFile(file, savePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save image"})
+		return
+	}
+
+	// Update image_url in DB
+	if err := h.usecase.UpdateImageURL(id, dbPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to update product image url"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success upload image",
+		"image_url": dbPath,
+	})
 }
 
 // ========================
@@ -130,4 +178,20 @@ func (h *ProductHandler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "success delete product"})
+}
+
+// ========================
+// GET ALL CATEGORIES
+// ========================
+func (h *ProductHandler) GetCategories(c *gin.Context) {
+	categories, err := h.usecase.GetCategories()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success get categories",
+		"data":    categories,
+	})
 }

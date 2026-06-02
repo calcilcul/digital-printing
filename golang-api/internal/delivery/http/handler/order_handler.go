@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -120,12 +123,18 @@ func (h *OrderHandler) Cancel(c *gin.Context) {
 
 	userID := c.MustGet("user_id").(int)
 
+	// Parse optional reason dari request body
+	var reqBody struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&reqBody)
+
 	// Tarik Metadata untuk Audit Log
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
 
 	// Panggil usecase dengan Context dan metadata
-	err = h.usecase.Cancel(c.Request.Context(), orderID, userID, ip, ua)
+	err = h.usecase.Cancel(c.Request.Context(), orderID, userID, reqBody.Reason, ip, ua)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
@@ -244,48 +253,277 @@ func (h *OrderHandler) DownloadInvoicePDF(c *gin.Context) {
 		return
 	}
 
-	// Generate PDF
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.AddPage()
-
-	// Header
-	pdf.SetFont("Arial", "B", 20)
-	pdf.Cell(0, 10, "INVOICE JAYA MANDIRI")
-	pdf.Ln(12)
-
-	pdf.SetFont("Arial", "", 12)
-	pdf.Cell(0, 10, fmt.Sprintf("Order Code: %s", detail.OrderCode))
-	pdf.Ln(8)
-	pdf.Cell(0, 10, fmt.Sprintf("Status: %s", detail.Status))
-	pdf.Ln(8)
-	pdf.Cell(0, 10, fmt.Sprintf("Tanggal: %s", detail.CreatedAt.Format("02 Jan 2006 15:04")))
-	pdf.Ln(15)
-
-	// Table Header
-	pdf.SetFont("Arial", "B", 12)
-	pdf.CellFormat(80, 10, "Produk", "1", 0, "C", false, 0, "")
-	pdf.CellFormat(30, 10, "Harga", "1", 0, "C", false, 0, "")
-	pdf.CellFormat(20, 10, "Qty", "1", 0, "C", false, 0, "")
-	pdf.CellFormat(40, 10, "Subtotal", "1", 0, "C", false, 0, "")
-	pdf.Ln(10)
-
-	// Table Content
-	pdf.SetFont("Arial", "", 12)
-	for _, item := range detail.Items {
-		pdf.CellFormat(80, 10, item.ProductName, "1", 0, "", false, 0, "")
-		pdf.CellFormat(30, 10, fmt.Sprintf("%.0f", item.Price), "1", 0, "R", false, 0, "")
-		pdf.CellFormat(20, 10, fmt.Sprintf("%d", item.Quantity), "1", 0, "C", false, 0, "")
-		pdf.CellFormat(40, 10, fmt.Sprintf("%.0f", item.SubTotal), "1", 0, "R", false, 0, "")
-		pdf.Ln(10)
+	// Cek apakah ada payment yang approved
+	isPaymentApproved := false
+	for _, pt := range detail.PaymentTransactions {
+		if pt.Status == "approved" || pt.PaymentStatus == "approved" {
+			isPaymentApproved = true
+			break
+		}
 	}
 
-	// Total
+	// Guard: jangan generate invoice jika payment belum approved
+	if !isPaymentApproved {
+		c.JSON(http.StatusForbidden, gin.H{
+			"message": "Invoice belum tersedia. Pembayaran belum diverifikasi.",
+		})
+		return
+	}
+
+	// Generate PDF
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(15, 15, 15)
+	pdf.AddPage()
+
+	// 1. Header (Logo & Title)
+	// Draw Logo Box (J Jaya Mandiri)
+	pdf.SetDrawColor(226, 232, 240) // border grey
+	pdf.SetFillColor(255, 255, 255)
+	pdf.Rect(15, 15, 55, 12, "D")
+
+	// Print letter "J" in blue bold
+	pdf.SetFont("Arial", "B", 13)
+	pdf.SetTextColor(37, 99, 235) // blue
+	pdf.SetXY(18, 16)
+	pdf.Cell(5, 10, "J")
+
+	// Print text "Jaya Mandiri" in dark slate
+	pdf.SetFont("Arial", "B", 11)
+	pdf.SetTextColor(30, 41, 59) // dark slate
+	pdf.SetXY(24, 16)
+	pdf.Cell(40, 10, "Jaya Mandiri")
+
+	// Print invoice title on right side
+	pdf.SetFont("Arial", "B", 9)
+	pdf.SetTextColor(100, 116, 139) // Slate grey
+	pdf.SetXY(140, 14)
+	pdf.CellFormat(55, 6, "DIGITAL PRINTING", "", 0, "R", false, 0, "")
+
+	pdf.SetFont("Arial", "B", 24)
+	pdf.SetTextColor(15, 23, 42) // Dark Slate/Navy
+	pdf.SetXY(140, 20)
+	pdf.CellFormat(55, 10, "INVOICE", "", 0, "R", false, 0, "")
+
+	// 2. From & To Address Boxes (Y = 35)
+	// Draw From Box (Detail Toko)
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.Rect(15, 35, 85, 43, "D")
+
+	pdf.SetFont("Arial", "B", 8)
+	pdf.SetTextColor(37, 99, 235) // blue
+	pdf.SetXY(20, 37)
+	pdf.Cell(80, 5, "FROM")
+	pdf.SetXY(20, 40)
+	pdf.Cell(80, 5, "DETAIL TOKO")
+
+	pdf.SetFont("Arial", "B", 11)
+	pdf.SetTextColor(30, 41, 59)
+	pdf.SetXY(20, 47)
+	pdf.Cell(80, 5, "Jaya Mandiri")
+
+	pdf.SetFont("Arial", "", 9)
+	pdf.SetTextColor(71, 85, 105)
+	pdf.SetXY(20, 53)
+	pdf.Cell(80, 5, "Digital Printing & Percetakan")
+	pdf.SetXY(20, 58)
+	pdf.Cell(80, 5, "Jl. Percetakan No. 1, Kota")
+	pdf.SetXY(20, 63)
+	pdf.Cell(80, 5, "Indonesia")
+	pdf.SetXY(20, 68)
+	pdf.Cell(80, 5, "admin@jayamandiri.com")
+
+	// Draw To Box (Detail Pelanggan)
+	pdf.Rect(110, 35, 85, 43, "D")
+
+	pdf.SetFont("Arial", "B", 8)
+	pdf.SetTextColor(22, 163, 74) // green
+	pdf.SetXY(115, 37)
+	pdf.Cell(80, 5, "TO")
+	pdf.SetXY(115, 40)
+	pdf.Cell(80, 5, "DETAIL PELANGGAN")
+
+	pdf.SetFont("Arial", "B", 11)
+	pdf.SetTextColor(30, 41, 59)
+	pdf.SetXY(115, 47)
+	custName := detail.CustomerName
+	if custName == "" {
+		custName = "Pelanggan"
+	}
+	pdf.Cell(80, 5, custName)
+
+	pdf.SetFont("Arial", "", 9)
+	pdf.SetTextColor(71, 85, 105)
+	pdf.SetXY(115, 53)
+	custEmail := detail.CustomerEmail
+	if custEmail == "" {
+		custEmail = "-"
+	}
+	pdf.Cell(80, 5, custEmail)
+	pdf.SetXY(115, 58)
+	custPhone := detail.CustomerPhone
+	if custPhone == "" {
+		custPhone = "-"
+	}
+	pdf.Cell(80, 5, custPhone)
+
+	// 3. Metadata Row (Y = 88)
+	// Draw horizontal line divider
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.Line(15, 84, 195, 84)
+	pdf.Line(15, 99, 195, 99)
+
+	// Column 1: No Invoice
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(100, 116, 139)
+	pdf.SetXY(15, 86)
+	pdf.Cell(50, 4, "NO. INVOICE")
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.SetXY(15, 91)
+	pdf.Cell(50, 6, detail.OrderCode)
+
+	// Column 2: Tanggal Order
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(100, 116, 139)
+	pdf.SetXY(75, 86)
+	pdf.Cell(50, 4, "TANGGAL ORDER")
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.SetXY(75, 91)
+	pdf.Cell(50, 6, formatIndonesianDate(detail.CreatedAt))
+
+	// Column 3: Status
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(100, 116, 139)
+	pdf.SetXY(135, 86)
+	pdf.Cell(50, 4, "STATUS")
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.SetXY(135, 91)
+	pdf.Cell(50, 6, mapStatusIndonesian(detail.Status))
+
+	// 4. Table Header (Y = 108)
+	pdf.SetFont("Arial", "B", 8)
+	pdf.SetTextColor(71, 85, 105)
+
+	pdf.SetXY(15, 106)
+	pdf.Cell(90, 6, "ITEM / PRODUK")
+	pdf.SetXY(110, 106)
+	pdf.CellFormat(15, 6, "QTY", "", 0, "C", false, 0, "")
+	pdf.SetXY(130, 106)
+	pdf.CellFormat(30, 6, "HARGA SATUAN", "", 0, "R", false, 0, "")
+	pdf.SetXY(165, 106)
+	pdf.CellFormat(30, 6, "SUBTOTAL", "", 0, "R", false, 0, "")
+
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.Line(15, 113, 195, 113)
+
+	// 5. Table Rows (starting Y = 117)
+	currentY := 117.0
+	for _, item := range detail.Items {
+		// Product name & Variant
+		pdf.SetFont("Arial", "B", 9.5)
+		pdf.SetTextColor(15, 23, 42)
+		pdf.SetXY(15, currentY)
+		pdf.Cell(90, 5, item.ProductName)
+
+		pdf.SetFont("Arial", "", 8)
+		pdf.SetTextColor(37, 99, 235) // blue
+		pdf.SetXY(15, currentY+5)
+		variantStr := "Varian: " + item.VariantName
+		if item.VariantName == "" {
+			variantStr = "Varian: Standar"
+		}
+		pdf.Cell(90, 4, variantStr)
+
+		// Qty
+		pdf.SetFont("Arial", "", 9.5)
+		pdf.SetTextColor(15, 23, 42)
+		pdf.SetXY(110, currentY)
+		pdf.CellFormat(15, 5, fmt.Sprintf("%d", item.Quantity), "", 0, "C", false, 0, "")
+
+		// Unit Price
+		pdf.SetXY(130, currentY)
+		pdf.CellFormat(30, 5, formatRupiah(item.Price), "", 0, "R", false, 0, "")
+
+		// Subtotal
+		pdf.SetXY(165, currentY)
+		pdf.CellFormat(30, 5, formatRupiah(item.SubTotal), "", 0, "R", false, 0, "")
+
+		// Divider line under item row
+		currentY += 14.0
+		pdf.SetDrawColor(241, 245, 249) // very light grey divider
+		pdf.Line(15, currentY-2, 195, currentY-2)
+	}
+
+	// 6. Summary Card (on the right)
+	currentY += 5.0
+
+	// Draw stamp LUNAS on the left
+	pdf.SetDrawColor(22, 163, 74)
+	pdf.SetFillColor(240, 253, 244)
+	pdf.Rect(15, currentY+5, 50, 15, "FD")
+
 	pdf.SetFont("Arial", "B", 12)
-	pdf.CellFormat(130, 10, "TOTAL", "1", 0, "R", false, 0, "")
-	pdf.CellFormat(40, 10, fmt.Sprintf("%.0f", detail.TotalPrice), "1", 0, "R", false, 0, "")
+	pdf.SetTextColor(22, 163, 74)
+	pdf.SetXY(15, currentY+10)
+	pdf.CellFormat(50, 5, "LUNAS", "", 0, "C", false, 0, "")
+
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.SetFillColor(248, 250, 252)
+	pdf.Rect(115, currentY, 80, 31, "FD")
+
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(71, 85, 105)
+	pdf.SetXY(120, currentY+3)
+	pdf.Cell(70, 4, "RINGKASAN INVOICE")
+
+	pdf.SetFont("Arial", "", 9)
+	pdf.SetTextColor(71, 85, 105)
+	pdf.SetXY(120, currentY+9)
+	pdf.Cell(40, 5, "Subtotal")
+	pdf.SetXY(160, currentY+9)
+	pdf.CellFormat(30, 5, formatRupiah(detail.TotalPrice), "", 0, "R", false, 0, "")
+
+	pdf.SetXY(120, currentY+15)
+	pdf.Cell(40, 5, "Biaya Layanan")
+	pdf.SetXY(160, currentY+15)
+	pdf.CellFormat(30, 5, "Gratis", "", 0, "R", false, 0, "")
+
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.Line(120, currentY+21, 190, currentY+21)
+
+	pdf.SetFont("Arial", "B", 9.5)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.SetXY(120, currentY+24)
+	pdf.Cell(40, 5, "Total")
+	pdf.SetXY(160, currentY+24)
+	pdf.CellFormat(30, 5, formatRupiah(detail.TotalPrice), "", 0, "R", false, 0, "")
+
+	// 7. Footer
+	pdf.SetDrawColor(241, 245, 249)
+	pdf.Line(15, 260, 195, 260)
+
+	pdf.SetFont("Arial", "", 8)
+	pdf.SetTextColor(100, 116, 139)
+	pdf.SetXY(15, 264)
+	footerMsg := "Terima kasih telah mempercayai Jaya Mandiri untuk kebutuhan cetak Anda. | Invoice diterbitkan otomatis oleh sistem."
+	pdf.CellFormat(180, 5, footerMsg, "", 0, "C", false, 0, "")
+
+	if c.Query("base64") == "true" {
+		var buf bytes.Buffer
+		err = pdf.Output(&buf)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal generate PDF"})
+			return
+		}
+		encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+		c.JSON(http.StatusOK, gin.H{"pdf": encoded})
+		return
+	}
 
 	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=invoice_%s.pdf", detail.OrderCode))
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=invoice_%s.pdf", detail.OrderCode))
 
 	err = pdf.Output(c.Writer)
 	if err != nil {
@@ -353,6 +591,28 @@ func (h *OrderHandler) UploadDesign(c *gin.Context) {
 		return
 	}
 
+	// === 🧪 AI BLUR DETECTION ===
+	ext := strings.ToLower(filepath.Ext(filePath))
+	isImage := ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp"
+	if isImage {
+		physicalPath := strings.TrimPrefix(filePath, "/")
+		isSharp, aiErr := checkBlurWithAI(physicalPath)
+		if aiErr != nil {
+			_ = os.Remove(physicalPath)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"message": fmt.Sprintf("Service AI sedang offline atau mengalami gangguan: %v. Harap nyalakan server python-ai.", aiErr),
+			})
+			return
+		} else if !isSharp {
+			_ = os.Remove(physicalPath)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Upload ditolak oleh AI: File desain yang Anda unggah terdeteksi buram/blur. Silakan unggah gambar dengan kualitas lebih tajam.",
+			})
+			return
+		}
+	}
+	// ============================
+
 	if err := h.usecase.UploadDesign(c.Request.Context(), orderID, orderItemID, filePath, userID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
@@ -388,6 +648,28 @@ func (h *OrderHandler) ReuploadDesign(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan file: " + err.Error()})
 		return
 	}
+
+	// === 🧪 AI BLUR DETECTION ===
+	ext2 := strings.ToLower(filepath.Ext(filePath))
+	isImage2 := ext2 == ".png" || ext2 == ".jpg" || ext2 == ".jpeg" || ext2 == ".webp"
+	if isImage2 {
+		physicalPath2 := strings.TrimPrefix(filePath, "/")
+		isSharp2, aiErr2 := checkBlurWithAI(physicalPath2)
+		if aiErr2 != nil {
+			_ = os.Remove(physicalPath2)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"message": fmt.Sprintf("Service AI sedang offline atau mengalami gangguan: %v. Harap nyalakan server python-ai.", aiErr2),
+			})
+			return
+		} else if !isSharp2 {
+			_ = os.Remove(physicalPath2)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Upload ditolak oleh AI: File desain yang Anda unggah terdeteksi buram/blur. Silakan unggah gambar dengan kualitas lebih tajam.",
+			})
+			return
+		}
+	}
+	// ============================
 
 	if err := h.usecase.ReuploadDesign(c.Request.Context(), orderID, orderItemID, filePath, userID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
@@ -597,6 +879,78 @@ func saveUploadedFile(c *gin.Context, fileHeader *multipart.FileHeader, subfolde
 		return "", err
 	}
 	return "/uploads/" + subfolder + "/" + filename, nil
+}
+
+func formatRupiah(amount float64) string {
+	p := int(amount)
+	parts := []string{}
+	for p > 0 {
+		rem := p % 1000
+		p = p / 1000
+		if p > 0 {
+			parts = append([]string{fmt.Sprintf("%03d", rem)}, parts...)
+		} else {
+			parts = append([]string{fmt.Sprintf("%d", rem)}, parts...)
+		}
+	}
+	if len(parts) == 0 {
+		return "Rp 0"
+	}
+	return "Rp " + strings.Join(parts, ".")
+}
+
+func mapStatusIndonesian(status string) string {
+	switch status {
+	case "waiting_payment":
+		return "Menunggu Pembayaran"
+	case "payment_verification":
+		return "Menunggu Verifikasi"
+	case "design_review":
+		return "Review Desain"
+	case "printing":
+		return "Sedang Dicetak"
+	case "ready":
+		return "Siap Diambil"
+	case "completed":
+		return "Selesai"
+	case "cancelled":
+		return "Dibatalkan"
+	default:
+		return status
+	}
+}
+
+func formatIndonesianDate(t time.Time) string {
+	day := t.Day()
+	year := t.Year()
+	var month string
+	switch t.Month() {
+	case time.January:
+		month = "Januari"
+	case time.February:
+		month = "Februari"
+	case time.March:
+		month = "Maret"
+	case time.April:
+		month = "April"
+	case time.May:
+		month = "Mei"
+	case time.June:
+		month = "Juni"
+	case time.July:
+		month = "Juli"
+	case time.August:
+		month = "Agustus"
+	case time.September:
+		month = "September"
+	case time.October:
+		month = "Oktober"
+	case time.November:
+		month = "November"
+	case time.December:
+		month = "Desember"
+	}
+	return fmt.Sprintf("%d %s %d", day, month, year)
 }
 
 

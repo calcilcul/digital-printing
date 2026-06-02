@@ -1,147 +1,147 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, SafeAreaView } from 'react-native';
+import { useAuthStore } from '../../store/authStore';
 import { useNavigation } from '@react-navigation/native';
-import { axiosClient } from '../../api/axiosClient';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ArrowLeft } from 'lucide-react-native';
+
+type AuthStackParamList = {
+  Login: undefined;
+  Register: undefined;
+};
+
+type RegisterScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Register'>;
+
+import Toast from 'react-native-toast-message';
 
 export default function RegisterScreen() {
-  const navigation = useNavigation<any>();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  const register = useAuthStore((state) => state.register);
+  const navigation = useNavigation<RegisterScreenNavigationProp>();
 
   const handleRegister = async () => {
-    if (!name || !email || !password) {
-      Alert.alert('Error', 'Mohon isi semua data yang diperlukan');
+    if (!name || !email || !password || !phone) {
+      Toast.show({
+        type: 'error',
+        text1: 'Validasi Gagal',
+        text2: 'Semua field harus diisi',
+      });
       return;
     }
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Konfirmasi password tidak cocok');
-      return;
-    }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password minimal 6 karakter');
-      return;
-    }
-
+    
     setLoading(true);
     try {
-      await axiosClient.post('/register', { name, email, password });
-      Alert.alert('Registrasi Berhasil', 'Akun Anda berhasil dibuat. Silakan login.', [
-        { text: 'Login Sekarang', onPress: () => navigation.navigate('Login') }
-      ]);
+      await register({ name, email, phone, password, role: 'customer' });
+      Toast.show({
+        type: 'success',
+        text1: 'Akun berhasil dibuat! Selamat datang.',
+      });
+      // Redirect to HomeTab
+      navigation.getParent()?.navigate('Customer', {
+        screen: 'Tabs',
+        params: { screen: 'HomeTab' }
+      });
     } catch (error: any) {
-      Alert.alert('Registrasi Gagal', error.response?.data?.message || 'Terjadi kesalahan, coba lagi.');
+      Toast.show({
+        type: 'error',
+        text1: 'Registrasi Gagal',
+        text2: error?.response?.data?.error || error?.message || 'Terjadi kesalahan saat registrasi',
+      });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#0A0B0D]">
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
-        <ScrollView 
-          className="flex-1 px-6" 
-          showsVerticalScrollIndicator={false} 
-          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 40 }}
-        >
-          {/* Top Back/Close Button */}
-          <View className="absolute top-4 left-6 z-10">
-            <TouchableOpacity 
-              onPress={() => navigation.goBack()} 
-              className="w-10 h-10 rounded-full bg-[#18191D] items-center justify-center border border-[#2B2C31]"
-            >
-              <Text className="text-white text-lg font-light">←</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1"
+      >
+        <ScrollView contentContainerStyle={{ padding: 24, justifyContent: 'center', flexGrow: 1 }}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            style={{ position: 'absolute', top: 24, left: 24, zIndex: 10, padding: 8, backgroundColor: '#e2e8f0', borderRadius: 20 }}
+          >
+            <ArrowLeft size={20} color="#475569" />
+          </TouchableOpacity>
+
+          <View className="mb-10 items-center mt-10">
+            <Text className="text-3xl font-bold text-blue-600 mb-2">Jaya Mandiri</Text>
+            <Text className="text-gray-500 text-base">Buat Akun Baru</Text>
+          </View>
+
+          <View className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <View className="mb-4">
+            <Text className="text-sm font-medium text-slate-600 mb-2">Nama Lengkap</Text>
+            <TextInput
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800"
+              placeholder="Masukkan nama lengkap Anda"
+              value={name}
+              onChangeText={setName}
+            />
+          </View>
+
+          <View className="mb-4">
+            <Text className="text-sm font-medium text-slate-600 mb-2">Email</Text>
+            <TextInput
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800"
+              placeholder="Masukkan email Anda"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+
+          <View className="mb-4">
+            <Text className="text-sm font-medium text-slate-600 mb-2">Nomor HP / WhatsApp</Text>
+            <TextInput
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800"
+              placeholder="Contoh: 08123456789"
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={setPhone}
+            />
+          </View>
+
+          <View className="mb-8">
+            <Text className="text-sm font-medium text-slate-600 mb-2">Password</Text>
+            <TextInput
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800"
+              placeholder="Minimal 6 karakter"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+          </View>
+
+          <TouchableOpacity 
+            onPress={handleRegister}
+            disabled={loading}
+            className={`w-full py-4 rounded-xl items-center justify-center ${loading ? 'bg-blue-400' : 'bg-blue-600'}`}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className="text-white font-bold text-lg">Daftar</Text>
+            )}
+          </TouchableOpacity>
+
+          <View className="flex-row justify-center mt-6">
+            <Text className="text-slate-600">Sudah punya akun? </Text>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Text className="text-blue-600 font-bold">Masuk di sini</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Logo & Headline */}
-          <View className="items-center mb-10 mt-8">
-            <View className="flex-row items-center mb-2">
-              <View className="w-8 h-8 bg-white rounded-lg items-center justify-center mr-2 shadow-md">
-                <Text className="text-[#0A0B0D] font-extrabold text-base">J</Text>
-              </View>
-              <Text className="text-white text-xl font-bold tracking-wider">JAYA MANDIRI</Text>
-            </View>
-            <Text className="text-white text-3xl font-bold mt-6 tracking-tight text-center">Create your account</Text>
-            <Text className="text-[#8E8E93] text-sm mt-2 text-center max-w-[280px]">
-              Daftar untuk mulai menikmati semua kemudahan cetak & advertising.
-            </Text>
-          </View>
-
-          {/* Input Fields */}
-          <View className="space-y-4">
-            <View>
-              <TextInput
-                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
-                placeholder="Nama Lengkap"
-                placeholderTextColor="#636469"
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
-
-            <View className="mt-3">
-              <TextInput
-                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
-                placeholder="Alamat Email"
-                placeholderTextColor="#636469"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
-              />
-            </View>
-
-            <View className="mt-3">
-              <TextInput
-                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
-                placeholder="Kata Sandi (Min. 6 karakter)"
-                placeholderTextColor="#636469"
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-            </View>
-
-            <View className="mt-3">
-              <TextInput
-                className="w-full bg-[#16171B] px-5 py-4 rounded-2xl border border-[#2F3037] text-white text-base"
-                placeholder="Konfirmasi Kata Sandi"
-                placeholderTextColor="#636469"
-                secureTextEntry
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-              />
-            </View>
-
-            {/* Register Action Button */}
-            <TouchableOpacity
-              className="w-full bg-white py-4.5 rounded-full items-center mt-6 active:opacity-90 shadow-lg shadow-white/10"
-              onPress={handleRegister}
-              disabled={loading}
-              style={{ height: 56, justifyContent: 'center' }}
-            >
-              {loading ? (
-                <ActivityIndicator color="#000000" />
-              ) : (
-                <Text className="text-[#0A0B0D] font-bold text-base tracking-wide">Next</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Back to Login CTA */}
-            <View className="flex-row justify-center mt-8">
-              <Text className="text-[#636469] text-sm">Sudah punya akun? </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                <Text className="text-white font-bold text-sm underline">Login</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+        </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-

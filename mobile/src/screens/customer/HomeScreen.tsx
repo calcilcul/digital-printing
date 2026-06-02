@@ -1,364 +1,370 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Dimensions, Platform, Linking, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  TextInput,
+  ActivityIndicator
+} from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { CustomerStackParamList } from '../../navigation/CustomerTabs';
+import { useProductStore, Product } from '../../store/productStore';
 import { useAuthStore } from '../../store/authStore';
-import { useProductStore } from '../../store/productStore';
-import { Search, ShoppingCart, User, Plus, ChevronRight, ChevronLeft, Truck, Clock, CreditCard, Flag, FileText, Image as ImageIcon, Shirt, Sticker } from 'lucide-react-native';
-import Animated, { useAnimatedScrollHandler, useSharedValue, useAnimatedStyle, interpolateColor, interpolate, Extrapolation, runOnJS } from 'react-native-reanimated';
 import { useCartStore } from '../../store/cartStore';
+import { axiosClient } from '../../api/axiosClient';
+import {
+  Search,
+  ShoppingCart,
+  Package,
+  Clock,
+  ChevronRight,
+  Printer,
+  Star,
+  Bell,
+  ClipboardList
+} from 'lucide-react-native';
 
-const { width } = Dimensions.get('window');
+type HomeScreenNavigationProp = NativeStackNavigationProp<CustomerStackParamList, 'Tabs'>;
 
-const HERO_IMAGES = [
-  'https://images.unsplash.com/photo-1598301257982-0cf014dff316?q=80&w=1000&auto=format&fit=crop', // Printing press
-  'https://images.unsplash.com/photo-1626785774573-4b799315345d?q=80&w=1000&auto=format&fit=crop', // Graphic design
-];
+const SkeletonCard = () => (
+  <View className="w-44 bg-white rounded-2xl shadow-sm overflow-hidden mr-4 border border-slate-100">
+    <View className="w-full bg-slate-200" style={{ aspectRatio: 1 }} />
+    <View className="p-3">
+      <View className="h-3 bg-slate-200 rounded-full w-12 mb-2" />
+      <View className="h-4 bg-slate-200 rounded-full w-full mb-1" />
+      <View className="h-4 bg-slate-200 rounded-full w-3/4 mb-3" />
+      <View className="h-5 bg-slate-200 rounded-full w-1/2" />
+    </View>
+  </View>
+);
 
-export default function HomeScreen() {
-  const { user, token } = useAuthStore();
-  const { products, fetchProducts } = useProductStore();
-  const { items, addItem, fetchCart } = useCartStore();
-  const navigation = useNavigation<any>();
-  const insets = useSafeAreaInsets();
-
-  const scrollY = useSharedValue(0);
-  const isScrolledAnim = useSharedValue(false);
-  const [activeHero, setActiveHero] = useState(0);
-  const [searchInput, setSearchInput] = useState('');
-  const [isScrolled, setIsScrolled] = useState(false);
-  const heroTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const categoryScrollRef = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    fetchProducts();
-    if (token) {
-      fetchCart();
-    }
-  }, [fetchProducts, token, fetchCart]);
-
-  // Auto-slide hero carousel
-  useEffect(() => {
-    heroTimerRef.current = setInterval(() => {
-      setActiveHero(prev => (prev + 1) % HERO_IMAGES.length);
-    }, 3500);
-    return () => { if (heroTimerRef.current) clearInterval(heroTimerRef.current); };
-  }, []);
-
-  const handleSearchSubmit = () => {
-    if (searchInput.trim()) {
-      navigation.navigate('Shop', { initialSearch: searchInput.trim() });
-      setSearchInput('');
-    }
-  };
-
-  const handleCustomQuote = () => {
-    const phone = '6281234567890'; // Ganti dengan nomor WA Jaya Mandiri
-    const message = 'Halo, saya ingin mendapatkan penawaran harga custom untuk kebutuhan percetakan saya.';
-    Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
-  };
-
-  const scrollHandler = useAnimatedScrollHandler({
-    onScroll: (event) => {
-      scrollY.value = event.contentOffset.y;
-      const shouldBeScrolled = event.contentOffset.y > 50;
-      if (shouldBeScrolled !== isScrolledAnim.value) {
-        isScrolledAnim.value = shouldBeScrolled;
-        runOnJS(setIsScrolled)(shouldBeScrolled);
-      }
-    },
-  });
-
-  const headerStyle = useAnimatedStyle(() => {
-    const backgroundColor = interpolateColor(
-      scrollY.value,
-      [0, 100],
-      ['rgba(255, 255, 255, 0)', 'rgba(255, 255, 255, 1)']
-    );
-    const shadowOpacity = interpolate(
-      scrollY.value,
-      [0, 100],
-      [0, 0.1],
-      Extrapolation.CLAMP
-    );
-    return {
-      backgroundColor,
-      shadowOpacity,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowRadius: 10,
-      elevation: scrollY.value > 50 ? 5 : 0,
-    };
-  });
-
-  const cartItemCount = items.reduce((total, item) => total + item.quantity, 0);
-  const userInitials = (user?.name || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
-
-  const handleQuickAdd = async (product: any) => {
-    if (!token) {
-      Alert.alert(
-        'Login Diperlukan',
-        'Silakan masuk ke akun Anda terlebih dahulu untuk menambahkan produk ke keranjang.',
-        [
-          { text: 'Batal', style: 'cancel' },
-          { text: 'Masuk', onPress: () => navigation.navigate('Login') }
-        ]
-      );
-      return;
-    }
-    if (product.variants && product.variants.length > 0) {
-      const success = await addItem(product.id, product.variants[0].id, 1);
-      if (success) {
-        Alert.alert('Sukses', 'Produk berhasil ditambahkan ke keranjang!');
-      } else {
-        Alert.alert('Gagal', 'Gagal menambahkan produk ke keranjang.');
-      }
-    }
-  };
+const ProductCard = ({ item, onPress }: { item: Product; onPress: () => void }) => {
+  const imageUrl = item.image_url
+    ? item.image_url.startsWith('http')
+      ? item.image_url
+      : `http://localhost:8000${item.image_url}`
+    : null;
 
   return (
-    <View className="flex-1 bg-surface">
-      {/* Sticky Header */}
-      <Animated.View 
-        style={[{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 50,
-          paddingTop: Platform.OS === 'ios' ? insets.top : insets.top + 10,
-          paddingBottom: 15,
-          paddingHorizontal: 20,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }, headerStyle]}
+    <TouchableOpacity
+      onPress={onPress}
+      className="w-44 bg-white rounded-2xl shadow-sm overflow-hidden mr-4 border border-slate-100"
+      activeOpacity={0.88}
+    >
+      <View className="w-full bg-slate-100 items-center justify-center" style={{ aspectRatio: 1 }}>
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} className="w-full h-full" resizeMode="cover" />
+        ) : (
+          <View className="flex-1 w-full items-center justify-center">
+            <View className="w-14 h-14 bg-blue-50 rounded-full items-center justify-center">
+              <Package size={28} color="#93c5fd" />
+            </View>
+          </View>
+        )}
+      </View>
+      <View className="p-3">
+        <View className="bg-blue-50 self-start px-2 py-0.5 rounded-full mb-1.5">
+          <Text className="text-blue-600 text-[10px] font-bold">{item.category || 'Produk'}</Text>
+        </View>
+        <Text className="text-slate-800 font-bold text-sm leading-5 mb-1" numberOfLines={2}>
+          {item.name}
+        </Text>
+        <View className="flex-row items-center mb-2">
+          <Clock size={10} color="#94a3b8" />
+          <Text className="text-slate-400 text-xs ml-1">Est. {item.estimated_days} hari</Text>
+        </View>
+        <Text className="text-blue-600 font-bold text-base">
+          {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(item.base_price || 0)}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+export default function HomeScreen() {
+  const navigation = useNavigation<HomeScreenNavigationProp>();
+  const { products, isLoading, fetchProducts } = useProductStore();
+  const { user, token } = useAuthStore();
+  
+  // Safe extraction to prevent crashes if store is not ready
+  const cartStore = useCartStore() as any;
+  const totalItems = cartStore?.totalItems ?? 0;
+  const fetchCart = cartStore?.fetchCart ?? (() => {});
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [latestOrder, setLatestOrder] = useState<any>(null);
+  
+  const insets = useSafeAreaInsets();
+
+  // Initial load products
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  // Fetch last order safely with [] dependency and try-catch
+  useEffect(() => {
+    const fetchLatestOrder = async () => {
+      try {
+        const res = await axiosClient.get('/api/orders');
+        const orders = res.data?.data || res.data;
+        if (Array.isArray(orders) && orders.length > 0) {
+          setLatestOrder(orders[0]);
+        } else {
+          setLatestOrder(null);
+        }
+      } catch (error) {
+        setLatestOrder(null);
+        console.warn('Failed to fetch last order:', error);
+      }
+    };
+    fetchLatestOrder();
+  }, [token]);
+
+  // Sync cart with backend every time screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      if (token) {
+        fetchCart();
+      }
+    }, [token])
+  );
+
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim().length > 0) {
+      navigation.navigate('CatalogTab' as any, { searchQuery });
+      setSearchQuery('');
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch(status) {
+      case 'pending_design': return 'bg-slate-100 text-slate-700';
+      case 'design_uploaded': return 'bg-blue-100 text-blue-700';
+      case 'waiting_payment': return 'bg-orange-100 text-orange-700';
+      case 'payment_verification': return 'bg-yellow-100 text-yellow-700';
+      case 'payment_rejected': return 'bg-red-100 text-red-700';
+      case 'paid': return 'bg-green-100 text-green-700';
+      case 'design_review': return 'bg-blue-100 text-blue-700';
+      case 'revision_requested': return 'bg-amber-100 text-amber-700';
+      case 'printing': return 'bg-purple-100 text-purple-700';
+      case 'ready': return 'bg-teal-100 text-teal-700';
+      case 'completed': return 'bg-slate-100 text-slate-700';
+      case 'cancelled': return 'bg-red-100 text-red-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    if (status === 'pending_design') return 'BELUM UPLOAD DESAIN';
+    if (status === 'design_uploaded') return 'DESAIN DIUNGGAH';
+    if (status === 'payment_rejected') return 'PEMBAYARAN DITOLAK';
+    if (status === 'revision_requested') return 'DESAIN PERLU REVISI';
+    return status ? status.replace(/_/g, ' ').toUpperCase() : 'UNKNOWN';
+  };
+
+  const firstName = user?.name ? user.name.split(' ')[0] : 'Pelanggan';
+
+  return (
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#1A56E8' }}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: '#f8fafc' }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        keyboardShouldPersistTaps="handled"
       >
-        <View className={`flex-1 flex-row items-center rounded-full px-4 py-2 mr-4 border ${isScrolled ? 'bg-gray-100 border-gray-200' : 'bg-black/20 border-white/20'}`}>
-          <Search size={18} color={isScrolled ? '#64748B' : '#ffffff'} style={{ opacity: 0.8 }} />
-          <TextInput 
-            placeholder="Search products..." 
-            placeholderTextColor={isScrolled ? '#94A3B8' : 'rgba(255,255,255,0.7)'}
-            className={`ml-2 flex-1 py-0 ${isScrolled ? 'text-text' : 'text-white'}`}
-            value={searchInput}
-            onChangeText={setSearchInput}
+        {/* ── Header ── */}
+        <View style={{ backgroundColor: '#1A56E8', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 20, color: '#ffffff' }}>
+                Halo, {firstName} 👋
+              </Text>
+              <Text style={{ fontSize: 14, color: '#bfdbfe', marginTop: 4 }}>
+                Siap mencetak hari ini?
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => alert('Fitur notifikasi akan hadir di pembaruan selanjutnya! 🚀')}
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Bell size={18} color="#ffffff" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Cart' as any)}
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <ShoppingCart size={18} color="#ffffff" />
+                {token && totalItems > 0 && (
+                  <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#ef4444', width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#1A56E8' }}>
+                    <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: 'bold' }}>{totalItems}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => (navigation as any).navigate('ProfileTab')}
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center', marginLeft: 4 }}
+            >
+              <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#dbeafe', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#2563eb', fontWeight: 'bold', fontSize: 14 }}>
+                  {firstName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Search Bar */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 9999, paddingHorizontal: 16, paddingVertical: 10, borderWidth: 1, borderColor: '#e2e8f0' }}>
+          <Search size={16} color="#94a3b8" />
+          <TextInput
+            style={{ flex: 1, marginLeft: 8, color: '#334155', fontSize: 14 }}
+            placeholder="Cari produk cetak..."
+            placeholderTextColor="#94a3b8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
             onSubmitEditing={handleSearchSubmit}
             returnKeyType="search"
           />
         </View>
-        <View className="flex-row space-x-4 items-center">
-          <TouchableOpacity onPress={() => navigation.navigate('Cart')} className="relative mr-2">
-            <ShoppingCart size={24} color={isScrolled ? '#1E3A8A' : '#ffffff'} />
-            {cartItemCount > 0 && (
-              <View className="absolute -top-2 -right-2 bg-error w-5 h-5 rounded-full items-center justify-center border-2 border-white">
-                <Text className="text-white text-[10px] font-bold">{cartItemCount}</Text>
-              </View>
-            )}
+      </View>
+
+        {/* ── Hero Banner ── */}
+        <View className="mx-4 mt-5 p-6 rounded-3xl bg-blue-600 overflow-hidden">
+          <View
+            className="absolute w-40 h-40 bg-blue-500 rounded-full"
+            style={{ top: -30, right: -20, opacity: 0.5 }}
+          />
+          <View
+            className="absolute w-24 h-24 bg-blue-700 rounded-full"
+            style={{ bottom: -20, right: 60, opacity: 0.4 }}
+          />
+          <View className="flex-row items-center mb-3">
+            <View className="w-8 h-8 bg-white rounded-full items-center justify-center mr-2">
+              <Printer size={16} color="#2563eb" />
+            </View>
+            <Text className="text-blue-100 text-xs font-semibold">Jaya Mandiri Printing</Text>
+          </View>
+          <Text className="text-white font-bold text-2xl leading-8 mb-1">
+            Wujudkan{'\n'}Idemu Jadi Nyata ✨
+          </Text>
+          <Text className="text-blue-100 text-sm mt-1 mb-4">
+            Kualitas cetak premium, proses cepat & mudah.
+          </Text>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate('CatalogTab')}
+            className="bg-white self-start px-5 py-2.5 rounded-full flex-row items-center"
+            activeOpacity={0.9}
+          >
+            <Text className="text-blue-600 font-bold text-sm mr-1">Mulai Pesan</Text>
+            <ChevronRight size={14} color="#2563eb" />
           </TouchableOpacity>
-          
-          {!token ? (
+        </View>
+
+        {/* ── Stats Row ── */}
+        <View className="mx-4 mt-4 flex-row gap-3">
+          {( [
+            { label: 'Produk Aktif', value: `${products.length}+`, icon: Package },
+            { label: 'Kualitas Cetak', value: 'Premium', icon: Star },
+            { label: 'Estimasi', value: '1-3 Hari', icon: Clock },
+          ] as any[] ).map((s, i) => {
+            const Icon = s.icon;
+            return (
+              <View
+                key={i}
+                className="flex-1 bg-white rounded-2xl p-3 items-center border border-slate-100 shadow-sm"
+              >
+                <Icon size={18} color="#2563eb" />
+                <Text className="text-slate-800 font-bold text-sm mt-1">{s.value}</Text>
+                <Text className="text-slate-400 text-[10px] text-center">{s.label}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* ── Popular Products ── */}
+        <View className="mt-7">
+          <View className="flex-row items-center justify-between px-4 mb-3">
+            <Text className="font-bold text-lg text-slate-800">Produk Terpopuler</Text>
             <TouchableOpacity 
-              onPress={() => navigation.navigate('Profile')}
-              className="bg-primary px-4 py-2 rounded-full border border-white/20 shadow-md"
+              className="flex-row items-center"
+              onPress={() => (navigation as any).navigate('CatalogTab')}
             >
-              <Text className="text-white font-bold text-[11px]">Login / Register</Text>
+              <Text className="text-blue-600 text-sm font-semibold">Lihat Semua</Text>
+              <ChevronRight size={14} color="#2563eb" />
             </TouchableOpacity>
+          </View>
+
+          {isLoading ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16 }}
+            >
+              {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+            </ScrollView>
           ) : (
-            <TouchableOpacity 
-              onPress={() => navigation.navigate('Profile')}
-              className="w-8 h-8 bg-primary rounded-full items-center justify-center border-2 border-white/80 shadow-sm"
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16 }}
             >
-              <Text className="text-white font-bold text-[11px]">{userInitials}</Text>
-            </TouchableOpacity>
+              {products.slice(0, 5).map((item) => (
+                <ProductCard
+                  key={item.id}
+                  item={item}
+                  onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
+                />
+              ))}
+            </ScrollView>
           )}
         </View>
-      </Animated.View>
 
-      <Animated.ScrollView 
-        onScroll={scrollHandler}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
-      >
-        {/* Hero Section */}
-        <View className="h-[450px] w-full relative bg-gray-900">
-          {/* Crossfade Animation Images */}
-          {HERO_IMAGES.map((img, idx) => (
-            <Animated.View 
-              key={idx} 
-              className="absolute inset-0"
-              style={[{ opacity: activeHero === idx ? 1 : 0, transition: 'opacity 0.8s ease-in-out' as any }]}
+        {/* ── Pesanan Terakhir ── */}
+        {latestOrder && (
+          <View className="mt-7 mx-4">
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="font-bold text-lg text-slate-800">Pesanan terakhir</Text>
+              <TouchableOpacity onPress={() => (navigation as any).navigate('OrdersTab')}>
+                <Text className="text-blue-600 text-sm font-semibold">Lihat semua</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity 
+              onPress={() => navigation.navigate('OrderDetail', { orderId: latestOrder.id })}
+              className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex-row items-center justify-between"
+              activeOpacity={0.8}
             >
-              <Image source={{ uri: img }} className="w-full h-full" resizeMode="cover" />
-            </Animated.View>
-          ))}
-          
-          {/* Dark Overlay overall + Scrim for Navbar */}
-          <View className="absolute inset-0 bg-black/40" />
-          <View className="absolute top-0 left-0 right-0 h-32" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} />
-          
-          <View className="absolute bottom-12 left-0 right-0 items-center px-6">
-            <View className="bg-primary-light/20 px-3 py-1 rounded-full border border-primary-light/50 mb-4">
-              <Text className="text-white text-xs font-bold uppercase tracking-wider">Premium Quality</Text>
-            </View>
-            <Text className="text-white text-4xl font-extrabold mb-2 leading-tight text-center">Print Your Vision{"\n"}Into Reality.</Text>
-            <Text className="text-white/80 text-base mb-6 text-center">High-quality offset & digital printing delivered fast to your door.</Text>
-            
-            <TouchableOpacity onPress={() => navigation.navigate('Shop')} className="bg-primary-light px-8 py-4 rounded-full shadow-lg shadow-primary-light/30 flex-row items-center justify-center">
-              <Text className="text-white font-bold text-lg mr-2">Shop Now</Text>
-              <ChevronRight size={20} color="white" />
-            </TouchableOpacity>
-          </View>
-          
-          {/* Dot Indicators — Clickable */}
-          <View className="absolute bottom-4 left-0 right-0 flex-row justify-center space-x-2">
-            {HERO_IMAGES.map((_, idx) => (
-              <TouchableOpacity key={idx} onPress={() => setActiveHero(idx)}>
-                <View className={`h-1.5 rounded-full ${activeHero === idx ? 'w-6 bg-white' : 'w-1.5 bg-white/50'}`} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Promo Pills */}
-        <View className="flex-row px-6 py-6 justify-between">
-          <View className="flex-row items-center bg-white px-4 py-3 rounded-2xl flex-1 mr-2 shadow-sm border border-border">
-            <View className="bg-success/10 p-2 rounded-full mr-3">
-              <Truck size={20} color="#10B981" />
-            </View>
-            <View>
-              <Text className="font-bold text-text text-sm">Free Shipping</Text>
-              <Text className="text-text-muted text-xs">Orders {'>'} Rp 500k</Text>
-            </View>
-          </View>
-          <View className="flex-row items-center bg-white px-4 py-3 rounded-2xl flex-1 ml-2 shadow-sm border border-border">
-            <View className="bg-warning/10 p-2 rounded-full mr-3">
-              <Clock size={20} color="#F59E0B" />
-            </View>
-            <View>
-              <Text className="font-bold text-text text-sm">24h Delivery</Text>
-              <Text className="text-text-muted text-xs">On selected items</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Categories Horizontal */}
-        <View className="mb-8">
-          <View className="flex-row justify-between items-center px-6 mb-4">
-            <Text className="text-lg font-bold text-text">Category</Text>
-            <View className="flex-row items-center">
-              <TouchableOpacity onPress={() => navigation.navigate('Shop')} className="mr-3">
-                <Text className="text-primary-light font-bold text-sm">See all</Text>
-              </TouchableOpacity>
-              <View className="flex-row space-x-1">
-                <TouchableOpacity onPress={() => categoryScrollRef.current?.scrollTo({ x: 0, animated: true })} className="w-6 h-6 bg-gray-100 rounded-full items-center justify-center">
-                  <ChevronLeft size={16} color="#64748B" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => categoryScrollRef.current?.scrollTo({ x: 200, animated: true })} className="w-6 h-6 bg-gray-100 rounded-full items-center justify-center">
-                  <ChevronRight size={16} color="#64748B" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-          
-          <ScrollView 
-            ref={categoryScrollRef}
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={{ paddingHorizontal: 20 }} 
-            className="space-x-4"
-          >
-            {[
-              { name: 'Business Cards', Icon: CreditCard },
-              { name: 'Banners', Icon: Flag },
-              { name: 'Flyers', Icon: FileText },
-              { name: 'Posters', Icon: ImageIcon },
-              { name: 'Apparel', Icon: Shirt },
-              { name: 'Stickers', Icon: Sticker },
-            ].map((cat, i) => (
-              <TouchableOpacity key={i} className="items-center mr-4 w-[72px]" onPress={() => navigation.navigate('Shop', { initialCategory: cat.name })}>
-                <View className="w-16 h-16 bg-white rounded-2xl items-center justify-center shadow-sm border border-border mb-2">
-                  <cat.Icon size={26} color="#1E3A8A" strokeWidth={1.5} />
+              <View className="flex-row items-center flex-1">
+                <View className="w-14 h-14 bg-blue-50 rounded-2xl items-center justify-center mr-4">
+                  <ClipboardList size={26} color="#2563eb" />
                 </View>
-                <Text className="text-text-muted text-[10px] font-bold text-center leading-tight">{cat.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Product Grid */}
-        <View className="px-6 mb-8">
-          <View className="flex-row justify-between items-end mb-4">
-            <Text className="text-xl font-extrabold text-text">Trending Products</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Shop')}>
-              <Text className="text-primary-light font-bold text-sm">See All</Text>
+                <View className="flex-1 pr-2">
+                  <Text className="font-bold text-slate-800 text-sm mb-0.5" numberOfLines={1}>
+                    {latestOrder.order_code}
+                  </Text>
+                  <Text className="text-slate-500 text-xs" numberOfLines={1}>
+                    {latestOrder.items && latestOrder.items.length > 0 
+                      ? `${latestOrder.items[0].product_name} x${latestOrder.items[0].quantity}` 
+                      : 'Detail pesanan'}
+                  </Text>
+                </View>
+              </View>
+              <View className={`px-3 py-1.5 rounded-full border ${getStatusColor(latestOrder.status)}`}>
+                <Text className={`text-xs font-bold ${getStatusColor(latestOrder.status).split(' ')[1]}`}>
+                  {getStatusText(latestOrder.status)}
+                </Text>
+              </View>
             </TouchableOpacity>
           </View>
-
-          <View className="flex-row flex-wrap justify-between">
-            {products.slice(0, 4).map((product) => (
-              <View key={product.id} className="w-[48%] bg-white rounded-3xl mb-4 shadow-sm border border-border overflow-hidden">
-                <TouchableOpacity onPress={() => navigation.navigate('ProductDetail', { productId: product.id })}>
-                  <View className="h-40 bg-gray-100 relative">
-                    <Image source={{ uri: product.image }} className="w-full h-full" resizeMode="cover" />
-                  </View>
-                  <View className="p-4">
-                    <Text className="text-xs text-primary font-bold mb-1 uppercase">Printing</Text>
-                    <Text className="text-text font-bold text-sm mb-2" numberOfLines={2}>{product.name}</Text>
-                    <View className="flex-row justify-between items-center mt-1">
-                      <Text className="text-text font-extrabold">Rp {product.base_price.toLocaleString('id-ID')}</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={() => handleQuickAdd(product)}
-                  className="absolute bottom-3 right-3 w-8 h-8 bg-primary rounded-full items-center justify-center shadow-sm shadow-primary/40"
-                >
-                  <Plus size={16} color="white" />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* How It Works (Dark Mode Card) */}
-        <View className="px-6 mb-10">
-          <View className="bg-text rounded-[32px] p-8 shadow-xl">
-            <Text className="text-white text-xl font-bold mb-6">How It Works</Text>
-            
-            <View className="flex-row mb-6">
-              <View className="w-8 h-8 bg-primary-light rounded-full items-center justify-center mr-4">
-                <Text className="text-white font-bold">1</Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-white font-bold text-base mb-1">Select Product</Text>
-                <Text className="text-white/60 text-sm">Choose from our wide range of printing materials and options.</Text>
-              </View>
-            </View>
-            
-            <View className="flex-row mb-6">
-              <View className="w-8 h-8 bg-primary-light rounded-full items-center justify-center mr-4">
-                <Text className="text-white font-bold">2</Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-white font-bold text-base mb-1">Upload Design</Text>
-                <Text className="text-white/60 text-sm">Upload your ready-to-print artwork in PDF, AI, or high-res JPG.</Text>
-              </View>
-            </View>
-
-            <View className="flex-row">
-              <View className="w-8 h-8 bg-success rounded-full items-center justify-center mr-4">
-                <Text className="text-white font-bold">3</Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-white font-bold text-base mb-1">Delivered Fast</Text>
-                <Text className="text-white/60 text-sm">We print it with high quality and ship it directly to your door.</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-      </Animated.ScrollView>
-    </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }

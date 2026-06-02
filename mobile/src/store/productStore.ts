@@ -3,38 +3,39 @@ import { axiosClient } from '../api/axiosClient';
 
 export interface ProductVariant {
   id: number;
-  product_id: number;
   sku: string;
-  variant_name: string;
+  name: string;
   price: number;
   stock: number;
-  is_active: boolean;
+  material_id: number;
+  material_usage: number;
 }
 
 export interface Product {
   id: number;
-  category_id?: number | null;
   name: string;
+  category: string;
+  category_id: number;
   description: string;
   base_price: number;
   estimated_days: number;
+  image_url: string;
   is_active: boolean;
   variants: ProductVariant[];
-  created_at: string;
-  // Tambahan untuk UI mobile
-  image?: string;
 }
 
 interface ProductState {
   products: Product[];
+  categories: string[];
   isLoading: boolean;
   error: string | null;
   fetchProducts: () => Promise<void>;
-  getProductById: (id: number) => Product | undefined;
+  fetchCategories: () => Promise<void>;
 }
 
-export const useProductStore = create<ProductState>((set, get) => ({
+export const useProductStore = create<ProductState>((set) => ({
   products: [],
+  categories: [],
   isLoading: false,
   error: null,
 
@@ -42,24 +43,43 @@ export const useProductStore = create<ProductState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await axiosClient.get('/products');
-      const data = response.data?.data || [];
       
-      const mappedProducts = data.map((p: any) => ({
-        ...p,
-        // Gunakan image_url dari backend, fallback ke placeholder jika kosong
-        image: p.image_url && p.image_url !== ''
-          ? p.image_url
-          : `https://placehold.co/400x300/1E3A8A/white?text=${encodeURIComponent(p.name)}`,
-      }));
+      // Backend response: { status, message, data: { products: [...] } }
+      // or { status, message, data: [...] }
+      const raw = response.data;
+      let products: Product[] = [];
 
-      set({ products: mappedProducts, isLoading: false });
+      if (raw?.data?.products) {
+        products = raw.data.products;
+      } else if (Array.isArray(raw?.data)) {
+        products = raw.data;
+      } else if (Array.isArray(raw?.products)) {
+        products = raw.products;
+      } else if (Array.isArray(raw)) {
+        products = raw;
+      }
+
+      set({ products, isLoading: false });
     } catch (error: any) {
-      console.error('Gagal mengambil produk:', error);
-      set({ error: error.message || 'Terjadi kesalahan', isLoading: false });
+      console.error('Failed to fetch products:', error);
+      set({ 
+        error: error?.response?.data?.message || 'Gagal memuat produk', 
+        isLoading: false 
+      });
     }
   },
 
-  getProductById: (id: number) => {
-    return get().products.find(p => p.id === id);
-  }
+  fetchCategories: async () => {
+    try {
+      const response = await axiosClient.get('/categories');
+      const raw = response.data;
+      let categories: string[] = [];
+      if (raw && Array.isArray(raw.data)) {
+        categories = raw.data.map((c: any) => c.name || c);
+      }
+      set({ categories });
+    } catch (error: any) {
+      console.error('Failed to fetch categories:', error);
+    }
+  },
 }));

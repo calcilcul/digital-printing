@@ -1,148 +1,229 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Alert, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
+import { User, Mail, Phone, LogOut, Edit2, Check, X, ShieldCheck, Repeat, ChevronRight } from 'lucide-react-native';
+import Toast from 'react-native-toast-message';
+
 import { useAuthStore } from '../../store/authStore';
-import { useCartStore } from '../../store/cartStore';
-import { useStaffStore } from '../../store/staffStore';
-import { LogOut, Mail, Shield, Award, Clock, TrendingUp, Package } from 'lucide-react-native';
+import { axiosClient } from '../../api/axiosClient';
 
 export default function StaffProfileScreen() {
-  const { user, signOut } = useAuthStore();
-  const { clearCart } = useCartStore();
-  const { orders } = useStaffStore();
+  const { user, setUser, logout, switchRoleMode } = useAuthStore();
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(user?.name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const [isNameFocused, setIsNameFocused] = useState(false);
+  const [isPhoneFocused, setIsPhoneFocused] = useState(false);
+
+  const handleUpdateProfile = async () => {
+    if (!name.trim()) {
+      Toast.show({
+        type: 'error',
+        text1: 'Gagal memperbarui',
+        text2: 'Nama tidak boleh kosong'
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await axiosClient.put('/api/profile', { 
+        name: name.trim(), 
+        phone_number: phone.trim() 
+      });
+      if (user) {
+        setUser({ ...user, name: name.trim(), phone: phone.trim() });
+      }
+      Toast.show({
+        type: 'success',
+        text1: 'Sukses',
+        text2: 'Profil berhasil diperbarui'
+      });
+      setIsEditing(false);
+    } catch (error: any) {
+      const errMsg = error?.response?.data?.message || 'Gagal memperbarui profil';
+      Toast.show({
+        type: 'error',
+        text1: 'Gagal memperbarui',
+        text2: errMsg
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setName(user?.name || '');
+    setPhone(user?.phone || '');
+  };
 
   const handleLogout = () => {
-    Alert.alert('Keluar Akun', 'Apakah Anda yakin ingin keluar dari akun Staf?', [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Keluar', style: 'destructive', onPress: async () => {
-          clearCart();
-          await signOut();
-        }
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm("Apakah Anda yakin ingin keluar dari akun ini?");
+      if (confirm) {
+        logout().then(() => {
+          Toast.show({
+            type: 'success',
+            text1: 'Berhasil keluar dari akun.',
+          });
+        });
       }
-    ]);
+    } else {
+      Alert.alert('Konfirmasi', 'Yakin ingin keluar?', [
+        { text: 'Batal', style: 'cancel' },
+        { text: 'Keluar', style: 'destructive', onPress: async () => {
+            await logout();
+            Toast.show({
+              type: 'success',
+              text1: 'Berhasil keluar dari akun.',
+            });
+          }
+        }
+      ]);
+    }
   };
 
-  const getInitials = (name: string) => {
-    if (!name) return 'ST';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  };
-
-  const initials = getInitials(user?.name || 'Staff');
-
-  // Quick stat counts
-  const pendingPayment = orders.filter(o => o.status === 'payment_verification').length;
-  const pendingDesign = orders.filter(o => o.status === 'design_review' || o.status === 'paid').length;
-  const inPrinting = orders.filter(o => o.status === 'printing').length;
-  const completed = orders.filter(o => o.status === 'completed').length;
-
-  const InfoRow = ({ icon, label, value }: any) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-      <View style={{ width: 36, height: 36, backgroundColor: '#EFF6FF', borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
-        {icon}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: '#9CA3AF', fontSize: 11, marginBottom: 2 }}>{label}</Text>
-        <Text style={{ color: '#1F2937', fontWeight: '700', fontSize: 14 }}>{value}</Text>
-      </View>
-    </View>
-  );
+  const isOwner = user?.role?.toLowerCase() === 'owner';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-      {/* HEADER */}
-      <View style={{ backgroundColor: '#1E3A5F', paddingHorizontal: 24, paddingTop: 18, paddingBottom: 28 }}>
-        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>Akun & Sesi Kerja</Text>
-        <Text style={{ color: 'white', fontWeight: '900', fontSize: 20, marginTop: 2 }}>Profil Staf</Text>
-
-        {/* Avatar + name */}
-        <View style={{ alignItems: 'center', marginTop: 20 }}>
-          <View style={{
-            width: 80, height: 80, borderRadius: 40,
-            backgroundColor: '#2563EB',
-            alignItems: 'center', justifyContent: 'center',
-            borderWidth: 4, borderColor: 'rgba(255,255,255,0.3)',
-            shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 },
-            elevation: 8,
-          }}>
-            <Text style={{ color: 'white', fontWeight: '900', fontSize: 26 }}>{initials}</Text>
-          </View>
-          <Text style={{ color: 'white', fontWeight: '900', fontSize: 20, marginTop: 12 }}>{user?.name || 'Nama Staf'}</Text>
-          <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 5, marginTop: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Shield size={12} color="rgba(255,255,255,0.9)" />
-            <Text style={{ color: 'white', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>
-              {(user?.role || 'Staff').toUpperCase()}
-            </Text>
-          </View>
-        </View>
+    <ScrollView className="flex-1 bg-slate-50" contentContainerStyle={{ paddingBottom: 60 }}>
+      {/* Header Section */}
+      <View className="pt-16 pb-8 px-6 bg-white border-b border-slate-100 items-center">
+        {!isEditing ? (
+          <>
+            <View className={`w-24 h-24 ${isOwner ? 'bg-purple-100' : 'bg-blue-100'} rounded-full items-center justify-center mb-4`}>
+              <User size={40} color={isOwner ? "#7c3aed" : "#2563eb"} />
+            </View>
+            <Text className="text-2xl font-bold text-slate-800 text-center">{user?.name}</Text>
+            <Text className="text-slate-500 mt-1">{user?.email}</Text>
+            <View className={`px-3 py-1 rounded-full mt-3 ${isOwner ? 'bg-purple-100' : 'bg-blue-100'}`}>
+              <Text className={`text-xs font-bold uppercase tracking-wider ${isOwner ? 'text-purple-700' : 'text-blue-700'}`}>
+                {isOwner ? 'OWNER' : 'STAFF PRODUKSI'}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <Text className="text-xl font-bold text-slate-800 mb-2">Edit Profil</Text>
+        )}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-
-        {/* QUICK STATS */}
-        <Text style={{ fontWeight: '800', color: '#1F2937', fontSize: 14, marginBottom: 10, marginLeft: 4 }}>📊 Statistik Saya Hari Ini</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 }}>
-          {[
-            { label: 'Verifikasi', value: pendingPayment, color: '#C2410C', bg: '#FFF7ED', border: '#FED7AA' },
-            { label: 'Review Desain', value: pendingDesign, color: '#6D28D9', bg: '#F5F3FF', border: '#DDD6FE' },
-            { label: 'Sedang Cetak', value: inPrinting, color: '#065F46', bg: '#ECFDF5', border: '#A7F3D0' },
-            { label: 'Selesai', value: completed, color: '#374151', bg: '#F9FAFB', border: '#E5E7EB' },
-          ].map((item, idx) => (
-            <View key={idx} style={{ width: '50%', padding: 4 }}>
-              <View style={{ backgroundColor: item.bg, borderColor: item.border, borderWidth: 1, borderRadius: 18, padding: 14, alignItems: 'center' }}>
-                <Text style={{ fontSize: 26, fontWeight: '900', color: item.color }}>{item.value}</Text>
-                <Text style={{ fontSize: 11, color: item.color, fontWeight: '700', marginTop: 4 }}>{item.label}</Text>
+      <View className="p-6">
+        {isEditing ? (
+          <View className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
+            <View className="mb-4">
+              <Text className="text-sm font-medium text-slate-700 mb-1">Nama Lengkap</Text>
+              <View className={`flex-row items-center border rounded-xl px-4 py-3 transition-colors ${isNameFocused ? 'bg-white border-blue-500 shadow-sm' : 'bg-slate-50 border-slate-200'}`}>
+                <User color={isNameFocused ? "#2563eb" : "#94a3b8"} size={20} />
+                <TextInput
+                  className="flex-1 ml-3 text-slate-800 font-normal"
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Masukkan nama Anda"
+                  onFocus={() => setIsNameFocused(true)}
+                  onBlur={() => setIsNameFocused(false)}
+                  style={{ outlineStyle: 'none' } as any}
+                />
               </View>
             </View>
-          ))}
-        </View>
 
-        {/* ACCOUNT INFO */}
-        <Text style={{ fontWeight: '800', color: '#1F2937', fontSize: 14, marginBottom: 10, marginLeft: 4 }}>👤 Informasi Akun</Text>
-        <View style={{ backgroundColor: 'white', borderRadius: 24, paddingHorizontal: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2, marginBottom: 20 }}>
-          <InfoRow icon={<Mail size={16} color="#1D4ED8" />} label="Email" value={user?.email || 'staff@jayamandiri.com'} />
-          <InfoRow icon={<Shield size={16} color="#1D4ED8" />} label="Peran" value={(user?.role || 'Staff').charAt(0).toUpperCase() + (user?.role || 'Staff').slice(1)} />
-          <InfoRow icon={<Award size={16} color="#1D4ED8" />} label="Status" value="Aktif Bertugas ✓" />
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14 }}>
-            <View style={{ width: 36, height: 36, backgroundColor: '#EFF6FF', borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
-              <Clock size={16} color="#1D4ED8" />
+            <View className="mb-4">
+              <Text className="text-sm font-medium text-slate-700 mb-1">Email</Text>
+              <View className="flex-row items-center bg-slate-100 border border-slate-200 rounded-xl px-4 py-3">
+                <Mail color="#94a3b8" size={20} />
+                <TextInput
+                  className="flex-1 ml-3 text-slate-500 font-normal"
+                  value={user?.email}
+                  editable={false}
+                  style={{ outlineStyle: 'none' } as any}
+                />
+              </View>
+              <Text className="text-xs text-slate-400 mt-1 ml-1">Email tidak dapat diubah</Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: '#9CA3AF', fontSize: 11, marginBottom: 2 }}>Sesi Aktif Sejak</Text>
-              <Text style={{ color: '#1F2937', fontWeight: '700', fontSize: 14 }}>{new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+
+            <View className="mb-6">
+              <Text className="text-sm font-medium text-slate-700 mb-1">Nomor HP</Text>
+              <View className={`flex-row items-center border rounded-xl px-4 py-3 transition-colors ${isPhoneFocused ? 'bg-white border-blue-500 shadow-sm' : 'bg-slate-50 border-slate-200'}`}>
+                <Phone color={isPhoneFocused ? "#2563eb" : "#94a3b8"} size={20} />
+                <TextInput
+                  className="flex-1 ml-3 text-slate-800 font-normal"
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="08xxxxxxxxxx"
+                  keyboardType="phone-pad"
+                  onFocus={() => setIsPhoneFocused(true)}
+                  onBlur={() => setIsPhoneFocused(false)}
+                  style={{ outlineStyle: 'none' } as any}
+                />
+              </View>
+            </View>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity 
+                onPress={handleCancelEdit}
+                className="flex-1 bg-slate-100 py-3 rounded-xl flex-row justify-center items-center"
+              >
+                <X size={18} color="#64748b" />
+                <Text className="text-slate-600 font-bold ml-2">Batal</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={handleUpdateProfile}
+                disabled={isLoading}
+                className="flex-1 bg-blue-600 py-3 rounded-xl flex-row justify-center items-center"
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Check size={18} color="#ffffff" />
+                )}
+                <Text className="text-white font-bold ml-2">Simpan</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
+        ) : (
+          <View className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
+            <View className="p-4 border-b border-slate-50 flex-row justify-between items-center">
+              <Text className="text-slate-500">Nomor HP</Text>
+              <Text className="text-slate-800 font-medium">{user?.phone || '-'}</Text>
+            </View>
+            
+            <TouchableOpacity 
+              onPress={() => setIsEditing(true)}
+              className="p-4 bg-slate-50 flex-row justify-center items-center"
+            >
+              <Edit2 size={16} color="#2563eb" />
+              <Text className="text-blue-600 font-bold ml-2">Edit Profil</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-        {/* LOGOUT */}
-        <TouchableOpacity
+        {isOwner && (
+          <TouchableOpacity 
+            className="bg-white p-5 rounded-2xl flex-row items-center border border-purple-100 shadow-sm mb-4"
+            onPress={() => switchRoleMode('admin')}
+          >
+            <View className="bg-purple-50 p-3 rounded-xl mr-4">
+              <Repeat color="#9333ea" size={20} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-purple-700 font-bold text-base mb-0.5">Beralih ke Mode Admin</Text>
+              <Text className="text-purple-400 text-xs">Akses kelola sistem & laporan</Text>
+            </View>
+            <ChevronRight color="#d8b4fe" size={20} />
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity 
           onPress={handleLogout}
-          activeOpacity={0.8}
-          style={{
-            backgroundColor: 'white',
-            borderRadius: 18,
-            padding: 16,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 10,
-            borderWidth: 1.5,
-            borderColor: '#FECACA',
-            shadowColor: '#EF4444',
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 3 },
-            elevation: 3,
-          }}
+          className="bg-red-50 p-4 rounded-xl flex-row items-center justify-center border border-red-100 mb-6"
         >
-          <LogOut size={18} color="#DC2626" />
-          <Text style={{ color: '#DC2626', fontWeight: '800', fontSize: 15 }}>Keluar dari Akun Staf</Text>
+          <LogOut size={20} color="#ef4444" />
+          <Text className="text-red-600 font-bold ml-2">Keluar Akun</Text>
         </TouchableOpacity>
-
-        <Text style={{ color: '#D1D5DB', fontSize: 11, textAlign: 'center', marginTop: 20 }}>
-          Jaya Mandiri Percetakan & Advertising © 2026
-        </Text>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </ScrollView>
   );
 }

@@ -21,9 +21,10 @@ func (r *productRepository) FindAll() ([]product.Product, error) {
 
 	query := `
 		SELECT 
-			p.id, p.name, p.description, p.base_price,
+			p.id, p.category_id, COALESCE(c.name, '') as category_name, p.name, p.description, p.base_price, COALESCE(p.image_url, '') as image_url, p.is_active,
 			v.id as v_id, v.sku as v_sku, v.variant_name as v_name, v.price as v_price, v.stock as v_stock, v.is_active as v_is_active, v.material_id, v.material_usage
 		FROM products p
+		LEFT JOIN categories c ON c.id = p.category_id
 		LEFT JOIN product_variants v ON v.product_id = p.id
 		WHERE p.is_active = TRUE
 		ORDER BY p.id DESC
@@ -48,7 +49,7 @@ func (r *productRepository) FindAll() ([]product.Product, error) {
 		var vMaterialUsage sql.NullFloat64
 
 		err := rows.Scan(
-			&p.ID, &p.Name, &p.Description, &p.BasePrice,
+			&p.ID, &p.CategoryID, &p.CategoryName, &p.Name, &p.Description, &p.BasePrice, &p.ImageURL, &p.IsActive,
 			&vID, &vSku, &vName, &vPrice, &vStock, &vIsActive, &vMaterialID, &vMaterialUsage,
 		)
 		if err != nil {
@@ -98,6 +99,91 @@ func (r *productRepository) FindAll() ([]product.Product, error) {
 
 	return products, nil
 }
+
+// ========================
+// GET ALL PRODUCTS (FOR ADMIN)
+// ========================
+func (r *productRepository) FindAllForAdmin() ([]product.Product, error) {
+
+	query := `
+		SELECT 
+			p.id, p.category_id, COALESCE(c.name, '') as category_name, p.name, p.description, p.base_price, COALESCE(p.image_url, '') as image_url, p.is_active,
+			v.id as v_id, v.sku as v_sku, v.variant_name as v_name, v.price as v_price, v.stock as v_stock, v.is_active as v_is_active, v.material_id, v.material_usage
+		FROM products p
+		LEFT JOIN categories c ON c.id = p.category_id
+		LEFT JOIN product_variants v ON v.product_id = p.id
+		WHERE p.deleted_at IS NULL
+		ORDER BY p.id DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	productMap := make(map[int]*product.Product)
+	var productIDs []int
+
+	for rows.Next() {
+		var p product.Product
+		var vID sql.NullInt64
+		var vSku, vName sql.NullString
+		var vPrice sql.NullFloat64
+		var vStock sql.NullInt64
+		var vIsActive sql.NullBool
+		var vMaterialID sql.NullInt64
+		var vMaterialUsage sql.NullFloat64
+
+		err := rows.Scan(
+			&p.ID, &p.CategoryID, &p.CategoryName, &p.Name, &p.Description, &p.BasePrice, &p.ImageURL, &p.IsActive,
+			&vID, &vSku, &vName, &vPrice, &vStock, &vIsActive, &vMaterialID, &vMaterialUsage,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, exists := productMap[p.ID]; !exists {
+			productMap[p.ID] = &p
+			productIDs = append(productIDs, p.ID)
+		}
+
+		if vID.Valid {
+			variant := product.ProductVariant{
+				ID:          int(vID.Int64),
+				ProductID:   p.ID,
+				SKU:         vSku.String,
+				VariantName: vName.String,
+				Price:       vPrice.Float64,
+				Stock:       int(vStock.Int64),
+				IsActive:    vIsActive.Bool,
+			}
+			if vMaterialID.Valid {
+				matID := int(vMaterialID.Int64)
+				variant.MaterialID = &matID
+			}
+			if vMaterialUsage.Valid {
+				variant.MaterialUsage = vMaterialUsage.Float64
+			}
+			productMap[p.ID].Variants = append(productMap[p.ID].Variants, variant)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var products []product.Product
+	for _, id := range productIDs {
+		products = append(products, *productMap[id])
+	}
+
+	if len(products) == 0 {
+		return []product.Product{}, nil
+	}
+
+	return products, nil
+}
+
 
 // ========================
 // CREATE PRODUCT
@@ -236,10 +322,43 @@ func (r *productRepository) Update(product *product.Product) error {
 }
 
 // ========================
-// DELETE PRODUCT (Soft Delete)
+// UPDATE PRODUCT IMAGE URL
+// ========================
+func (r *productRepository) UpdateImageURL(id int, imageURL string) error {
+	query := `UPDATE products SET image_url = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL`
+	_, err := r.db.Exec(query, imageURL, id)
+	return err
+}
+
+// ========================
+// DELETE PRODUCT (SOFT DELETE)
 // ========================
 func (r *productRepository) Delete(id int) error {
 	query := `UPDATE products SET deleted_at = NOW(), is_active = false WHERE id = $1`
 	_, err := r.db.Exec(query, id)
 	return err
+}
+
+// ========================
+// GET ALL ACTIVE CATEGORIES
+// ========================
+func (r *productRepository) FindAllCategories() ([]product.Category, error) {
+	rows, err := r.db.Query("SELECT id, name FROM categories ORDER BY id ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []product.Category
+	for rows.Next() {
+		var cat product.Category
+		if err := rows.Scan(&cat.ID, &cat.Name); err == nil {
+			categories = append(categories, cat)
+		}
+	}
+	// Return empty slice instead of nil
+	if len(categories) == 0 {
+		return []product.Category{}, nil
+	}
+	return categories, nil
 }

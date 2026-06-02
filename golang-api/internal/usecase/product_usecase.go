@@ -28,9 +28,22 @@ func (u *ProductUsecase) GetAll() ([]product.Product, error) {
 }
 
 // ========================
+// GET ALL PRODUCTS (FOR ADMIN)
+// ========================
+func (u *ProductUsecase) GetAllForAdmin() ([]product.Product, error) {
+
+	products, err := u.repo.FindAllForAdmin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get products for admin: %w", err)
+	}
+
+	return products, nil
+}
+
+// ========================
 // CREATE PRODUCT
 // ========================
-func (u *ProductUsecase) Create(req product.ProductRequest) error {
+func (u *ProductUsecase) Create(req product.ProductRequest) (int, error) {
 	// Map request to entity
 	newProduct := product.Product{
 		CategoryID:    req.CategoryID,
@@ -55,10 +68,17 @@ func (u *ProductUsecase) Create(req product.ProductRequest) error {
 
 	err := u.repo.Create(&newProduct)
 	if err != nil {
-		return fmt.Errorf("failed to create product: %w", err)
+		return 0, fmt.Errorf("failed to create product: %w", err)
 	}
 
-	return nil
+	return newProduct.ID, nil
+}
+
+// ========================
+// UPDATE PRODUCT IMAGE URL
+// ========================
+func (u *ProductUsecase) UpdateImageURL(id int, imageURL string) error {
+	return u.repo.UpdateImageURL(id, imageURL)
 }
 
 // ========================
@@ -107,4 +127,11 @@ func (u *ProductUsecase) Delete(id int) error {
 	}
 
 	return nil
+}
+
+// ========================
+// GET ALL CATEGORIES
+// ========================
+func (u *ProductUsecase) GetCategories() ([]product.Category, error) {
+	return u.repo.FindAllCategories()
 }

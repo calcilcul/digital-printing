@@ -1,97 +1,123 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
+import { setItemAsync, getItemAsync, deleteItemAsync } from '../utils/storage';
+import { authApi } from '../api/authApi';
 import { axiosClient } from '../api/axiosClient';
+import { useCartStore } from './cartStore';
 
 interface User {
   id: number;
-  email: string;
   name: string;
+  email: string;
+  phone: string;
   role: string;
-  created_at?: string;
 }
 
 interface AuthState {
-  token: string | null;
   user: User | null;
-  initialized: boolean;
-  setSession: (token: string, user: User) => Promise<void>;
-  initializeAuth: () => Promise<void>;
-  signOut: () => Promise<void>;
+  token: string | null;
+  isLoading: boolean;
+  isSignout: boolean;
+  login: (data: any) => Promise<void>;
+  register: (data: any) => Promise<void>;
+  logout: () => Promise<void>;
+  checkAuth: () => Promise<void>;
+  setUser: (user: User | null) => void;
+  activeRoleMode: 'admin' | 'staff' | null;
+  switchRoleMode: (mode: 'admin' | 'staff') => void;
 }
 
-const TOKEN_KEY = 'jayamandiri_jwt_token';
-const USER_KEY = 'jayamandiri_user';
-
-export const useAuthStore = create<AuthState>((set) => ({
-  token: null,
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  initialized: false,
+  token: null,
+  isLoading: true,
+  isSignout: false,
+  activeRoleMode: null,
 
-  setSession: async (token, user) => {
+  switchRoleMode: (mode: 'admin' | 'staff') => set({ activeRoleMode: mode }),
+  setUser: (user: User | null) => set({ user }),
+  login: async (data: any) => {
     try {
-      if (Platform.OS !== 'web') {
-        await SecureStore.setItemAsync(TOKEN_KEY, token);
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
-      } else {
-        localStorage.setItem(TOKEN_KEY, token);
-        localStorage.setItem(USER_KEY, JSON.stringify(user));
-      }
-    } catch (e) {
-      console.log('Error saving token', e);
-    }
-    set({ token, user, initialized: true });
-  },
+      const response = await authApi.login(data);
+      // Response structure: { status, message, data: { token, user } }
+      const token = response.data.data?.token;
+      const userFromLogin = response.data.data?.user;
 
-  initializeAuth: async () => {
-    try {
-      let token = null;
-      let userStr = null;
+      if (!token) throw new Error('Token tidak ditemukan di respons login');
 
-      if (Platform.OS !== 'web') {
-        token = await SecureStore.getItemAsync(TOKEN_KEY);
-        userStr = await SecureStore.getItemAsync(USER_KEY);
-      } else {
-        token = localStorage.getItem(TOKEN_KEY);
-        userStr = localStorage.getItem(USER_KEY);
-      }
+      // Save token first
+      await setItemAsync('jwt_token', token);
 
-      if (token && userStr) {
-        set({ token, user: JSON.parse(userStr), initialized: true });
-      } else {
-        set({ token: null, user: null, initialized: true });
-      }
-    } catch (e) {
-      set({ token: null, user: null, initialized: true });
-    }
-  },
-
-  signOut: async () => {
-    try {
-      console.log('Sending logout request to backend...');
-      // 1. Kirim request ke backend terlebih dahulu agar database mencatat log logout
-      await axiosClient.post('/api/logout').catch((err) => {
-        console.log('Backend logout call failed or expired, cleaning up locally:', err.message);
+      // Fetch profile passing token directly
+      const profileResponse = await axiosClient.get('/api/profile', {
+        headers: { Authorization: `Bearer ${token}` }
       });
-    } catch (e) {
-      console.log('Error calling backend logout API', e);
-    } finally {
-      // 2. Apapun yang terjadi (sukses/gagal/offline), pastikan storage lokal dan state dihapus
-      try {
-        if (Platform.OS !== 'web') {
-          await SecureStore.deleteItemAsync(TOKEN_KEY);
-          await SecureStore.deleteItemAsync(USER_KEY);
-        } else {
-          localStorage.removeItem(TOKEN_KEY);
-          localStorage.removeItem(USER_KEY);
-        }
-      } catch (e) {
-        console.log('Error deleting token from local storage', e);
-      }
-      
-      // 3. Reset status global agar UI langsung merespon & berubah ke GuestProfileView
-      set({ token: null, user: null });
-      console.log('Auth state successfully reset to null');
+
+      // Profile response: { status, message, data: { user_id, name, ... } }
+      const profileData = profileResponse.data.data || profileResponse.data;
+
+      const userData = {
+        id: profileData.user_id || userFromLogin?.id,
+        name: profileData.name || userFromLogin?.name,
+        email: profileData.email || userFromLogin?.email,
+        phone: profileData.phone || userFromLogin?.phone,
+        role: profileData.role || userFromLogin?.role,
+      };
+
+      const initialRoleMode = userData.role?.toLowerCase() === 'owner' ? 'admin' : null;
+
+      set({ token, user: userData, isSignout: false, activeRoleMode: initialRoleMode });
+    } catch (error) {
+      throw error;
     }
+  },
+
+  register: async (data: any) => {
+    try {
+      await authApi.register(data);
+      await get().login({ email: data.email, password: data.password });
+    } catch (error) {
+      throw error;
+    }
+  },
+
+    logout: async () => {
+    try {
+      await authApi.logout();
+    } catch (e) {
+    } finally {
+      await deleteItemAsync('jwt_token');
+      useCartStore.getState().clearCart();
+      set({ token: null, user: null, isSignout: true });
+    }
+  },
+
+  checkAuth: async () => {
+    set({ isLoading: true });
+    let token = null;
+    let user = null;
+    try {
+      token = await getItemAsync('jwt_token');
+      if (token) {
+        const profileResponse = await authApi.getProfile();
+        const profileData = profileResponse.data.data || profileResponse.data;
+        user = {
+          id: profileData.user_id,
+          name: profileData.name,
+          email: profileData.email,
+          phone: profileData.phone,
+          role: profileData.role,
+        };
+      }
+    } catch (e) {
+      token = null;
+      await deleteItemAsync('jwt_token');
+    }
+    
+    let initialRoleMode = null;
+    if (user?.role?.toLowerCase() === 'owner') {
+      initialRoleMode = 'admin';
+    }
+
+    set({ token, user, isLoading: false, activeRoleMode: initialRoleMode });
   },
 }));

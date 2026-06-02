@@ -1,330 +1,259 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, Dimensions } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import Toast from 'react-native-toast-message';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { useProductStore } from '../../store/productStore';
-import { useCartStore } from '../../store/cartStore';
+import { ChevronLeft, ShoppingCart, Minus, Plus } from 'lucide-react-native';
 import { axiosClient } from '../../api/axiosClient';
-import { ChevronLeft, Heart, ShieldCheck, Truck, Star, UploadCloud, File, Trash, CheckCircle2, Clock } from 'lucide-react-native';
-import * as DocumentPicker from 'expo-document-picker';
-import Animated, { FadeIn, FadeOut, SlideInDown } from 'react-native-reanimated';
+import { useAuthStore } from '../../store/authStore';
+import { useCartStore } from '../../store/cartStore';
 
-const { width } = Dimensions.get('window');
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0
+  }).format(amount);
+};
 
 export default function ProductDetailScreen() {
   const route = useRoute<any>();
-  const navigation = useNavigation<any>();
-  const insets = useSafeAreaInsets();
-  const { productId } = route.params || {};
-  
-  const { getProductById, isLoading: isProductLoading } = useProductStore();
-  const { addItem, isLoading: isCartLoading } = useCartStore();
-  
-  const product = getProductById(productId);
-  
-  const [activeTab, setActiveTab] = useState('overview');
-  const [quantity, setQuantity] = useState(1);
-  const [selectedVariant, setSelectedVariant] = useState<any>(null);
-  
-  // Design Upload State
-  const [designFile, setDesignFile] = useState<any>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadLater, setUploadLater] = useState(false);
+  const navigation = useNavigation();
+  const productId = route.params?.productId;
 
-  const [showAddedFlash, setShowAddedFlash] = useState(false);
+  const [product, setProduct] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedVariant, setSelectedVariant] = useState<any>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState('');
+
+  const { token } = useAuthStore();
+  const { totalItems, fetchCart } = useCartStore();
 
   useEffect(() => {
-    if (product && product.variants && product.variants.length > 0 && !selectedVariant) {
-      setSelectedVariant(product.variants[0]);
-    }
-  }, [product]);
+    if (token) fetchCart();
+  }, [token, fetchCart]);
 
-  if (!product) {
-    return (
-      <View className="flex-1 justify-center items-center bg-surface">
-        <ActivityIndicator size="large" color="#1E3A8A" />
-      </View>
-    );
-  }
-
-  const handlePickFile = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'application/pdf'],
-        copyToCacheDirectory: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setDesignFile(result.assets[0]);
-        setUploadLater(false);
+  useEffect(() => {
+    const fetchProductDetail = async () => {
+      try {
+        const res = await axiosClient.get(`/products`);
+        const p = res.data.data?.find((item: any) => item.id === productId) || res.data?.products?.find((item: any) => item.id === productId);
+        setProduct(p);
+        if (p?.variants?.length > 0) {
+          setSelectedVariant(p.variants[0]);
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      Alert.alert('Error', 'Gagal memilih file');
-    }
-  };
+    };
+    fetchProductDetail();
+  }, [productId]);
 
   const handleAddToCart = async () => {
-    if (!product) return;
-    const success = await addItem(
-      product.id,
-      selectedVariant ? selectedVariant.id : product.variants[0]?.id || 0,
-      quantity,
-      selectedVariant?.variant_name || ''
-    );
-    if (success) {
-      setShowAddedFlash(true);
-      setTimeout(() => setShowAddedFlash(false), 2000);
+    if (!token) {
+      (navigation as any).navigate('Auth', { screen: 'Login' });
+      return;
+    }
+    if (!selectedVariant) {
+      Toast.show({
+        type: 'error',
+        text1: 'Perhatian',
+        text2: 'Silakan pilih varian produk terlebih dahulu.',
+      });
+      return;
+    }
+    try {
+      await axiosClient.post('/api/cart', {
+        product_id: product.id,
+        variant_id: selectedVariant.id,
+        quantity: quantity,
+        notes: notes
+      });
+      await fetchCart();
+      Toast.show({
+        type: 'success',
+        text1: 'Berhasil ditambahkan ke keranjang!',
+      });
+    } catch (error: any) {
+      Toast.show({
+        type: 'error',
+        text1: 'Gagal',
+        text2: error?.response?.data?.error || error?.message || 'Gagal menambahkan item. Coba lagi.',
+      });
     }
   };
 
-  const [isBuyingNow, setIsBuyingNow] = useState(false);
-
   const handleBuyNow = async () => {
-    if (!product || !selectedVariant) {
-      Alert.alert('Pilih Varian', 'Silakan pilih varian produk terlebih dahulu');
+    if (!token) {
+      (navigation as any).navigate('Auth', { screen: 'Login' });
       return;
     }
-    setIsBuyingNow(true);
+    if (!selectedVariant) {
+      Toast.show({
+        type: 'error',
+        text1: 'Perhatian',
+        text2: 'Silakan pilih varian produk terlebih dahulu.',
+      });
+      return;
+    }
     try {
       const res = await axiosClient.post('/api/buy-now', {
         product_id: product.id,
         variant_id: selectedVariant.id,
-        quantity,
-        notes: selectedVariant.variant_name || '',
+        quantity: quantity,
+        notes: notes
       });
-      const { order_id, order_code, total_price } = res.data;
-      // Navigate to upload design with order info
-      navigation.navigate('UploadDesign', {
-        orderId: order_id,
-        orderItems: [{
-          id: res.data.item_id || 0, // will be fetched from order detail if needed
-          product_name: product.name,
-          variant_name: selectedVariant.variant_name || '',
-          quantity,
-          notes: selectedVariant.variant_name || '',
-        }],
-        totalPrice: total_price,
+      Toast.show({
+        type: 'success',
+        text1: 'Berhasil',
+        text2: 'Pesanan berhasil dibuat!',
+      });
+      (navigation as any).replace('OrderDetail', { 
+        orderId: res.data.data?.id || res.data.order_id 
       });
     } catch (error: any) {
-      Alert.alert('Gagal', error.response?.data?.message || 'Terjadi kesalahan saat membuat pesanan');
-    } finally {
-      setIsBuyingNow(false);
+      Toast.show({
+        type: 'error',
+        text1: 'Gagal',
+        text2: error?.response?.data?.error || 'Gagal membuat order',
+      });
     }
   };
 
-  const isAddToCartDisabled = false; // Cart tidak perlu design dulu
-  const totalPrice = (selectedVariant?.price || product.base_price) * quantity;
+  const incrementQuantity = () => setQuantity(prev => prev + 1);
+  const decrementQuantity = () => {
+    if (quantity > 1) setQuantity(prev => prev - 1);
+  };
+
+  if (loading) {
+    return (
+      <View className="flex-1 justify-center items-center bg-slate-50">
+        <ActivityIndicator size="large" color="#2563eb" />
+      </View>
+    );
+  }
+
+  if (!product) {
+    return (
+      <View className="flex-1 justify-center items-center bg-slate-50">
+        <Text className="text-slate-500">Produk tidak ditemukan</Text>
+      </View>
+    );
+  }
+
+  const imageUrl = product.image_url
+    ? product.image_url.startsWith('http')
+      ? product.image_url
+      : `http://localhost:8000${product.image_url}`
+    : null;
+
+  const currentPrice = selectedVariant ? selectedVariant.price : (product.base_price || 0);
+  const subtotal = currentPrice * quantity;
 
   return (
-    <View className="flex-1 bg-surface">
-      {/* Header Overlays */}
-      <View className="absolute top-0 left-0 right-0 z-50 flex-row justify-between px-4" style={{ paddingTop: insets.top + 10 }}>
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()}
-          className="w-10 h-10 bg-white/80 rounded-full items-center justify-center backdrop-blur-md"
-        >
-          <ChevronLeft size={24} color="#0F172A" />
-        </TouchableOpacity>
-        <TouchableOpacity className="w-10 h-10 bg-white/80 rounded-full items-center justify-center backdrop-blur-md">
-          <Heart size={20} color="#0F172A" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* Gallery */}
-        <View className="w-full h-80 bg-gray-100">
-          <Image source={{ uri: product.image }} className="w-full h-full" resizeMode="cover" />
+    <View className="flex-1 bg-slate-50">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Image Section */}
+        <View className="w-full h-80 bg-slate-200 relative">
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} className="w-full h-full" resizeMode="cover" />
+          ) : (
+            <View className="w-full h-full items-center justify-center bg-slate-200">
+              <Text className="text-slate-400">No Image</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            className="absolute top-12 left-4 w-10 h-10 rounded-full bg-black/30 items-center justify-center backdrop-blur-md"
+          >
+            <ChevronLeft color="#fff" size={24} />
+          </TouchableOpacity>
         </View>
 
-        {/* Product Info */}
-        <View className="bg-white px-6 pt-6 pb-4 rounded-t-3xl -mt-6">
-          <Text className="text-primary-light font-bold text-xs uppercase mb-1">Printing Materials</Text>
-          <Text className="text-text text-2xl font-black mb-2 leading-tight">{product.name}</Text>
-          
-          <View className="flex-row items-center mb-4">
-            <View className="flex-row items-center bg-warning/10 px-2 py-1 rounded-md mr-3">
-              <Star size={14} color="#F59E0B" fill="#F59E0B" />
-              <Text className="text-warning font-bold text-xs ml-1">4.8 (124)</Text>
-            </View>
-            <Text className="text-text font-extrabold text-xl">Rp {product.base_price.toLocaleString('id-ID')}</Text>
+        {/* Info Section */}
+        <View className="px-4 py-5 bg-white mb-2">
+          <View className="bg-blue-50 self-start px-3 py-1 rounded-full mb-2">
+            <Text className="text-blue-600 font-bold text-xs">{product.category || 'Produk'}</Text>
           </View>
-
-          {/* Trust Pills */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
-            <View className="flex-row items-center bg-surface border border-border px-3 py-1.5 rounded-full mr-2">
-              <ShieldCheck size={14} color="#1E3A8A" />
-              <Text className="text-text-muted text-xs font-bold ml-1.5">Quality Guarantee</Text>
-            </View>
-            <View className="flex-row items-center bg-surface border border-border px-3 py-1.5 rounded-full mr-2">
-              <Truck size={14} color="#10B981" />
-              <Text className="text-text-muted text-xs font-bold ml-1.5">Fast Delivery</Text>
-            </View>
-          </ScrollView>
+          <Text className="text-2xl font-bold text-slate-800 mb-2">{product.name}</Text>
+          <Text className="text-slate-500 leading-6">{product.description || 'Tidak ada deskripsi tersedia untuk produk ini.'}</Text>
         </View>
 
-        {/* 3-Tab System */}
-        <View className="bg-white mt-2">
-          <View className="flex-row border-b border-border">
-            {['overview', 'specs', 'reviews'].map((tab) => (
-              <TouchableOpacity 
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                className={`flex-1 py-4 items-center border-b-2 ${activeTab === tab ? 'border-primary' : 'border-transparent'}`}
-              >
-                <Text className={`font-bold capitalize ${activeTab === tab ? 'text-primary' : 'text-text-muted'}`}>{tab}</Text>
-              </TouchableOpacity>
-            ))}
+        {/* Variants Section */}
+        {product.variants && product.variants.length > 0 && (
+          <View className="px-4 py-5 bg-white mb-2">
+            <Text className="font-bold text-slate-800 text-base mb-3">Pilih Varian</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {product.variants.map((v: any) => {
+                const isSelected = selectedVariant?.id === v.id;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    onPress={() => setSelectedVariant(v)}
+                    className={`px-4 py-2 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50' : 'border-slate-200 bg-white'}`}
+                  >
+                    <Text className={`font-semibold ${isSelected ? 'text-blue-600' : 'text-slate-600'}`}>{v.name || v.variant_name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
+        )}
 
-          <View className="p-6">
-            {activeTab === 'overview' && (
-              <Animated.View entering={FadeIn}>
-                <Text className="text-text-muted text-sm mb-6 leading-relaxed">
-                  {product.description || "High-quality custom printing tailored for your business needs. Outstanding color accuracy and premium paper stock."}
-                </Text>
-
-                {/* Options Selector */}
-                <Text className="font-bold text-text mb-3">Material & Finish</Text>
-                <View className="flex-row flex-wrap mb-6">
-                  {product.variants?.map((v: any) => (
-                    <TouchableOpacity 
-                      key={v.id}
-                      onPress={() => setSelectedVariant(v)}
-                      className={`px-4 py-3 rounded-xl border mr-3 mb-3 ${selectedVariant?.id === v.id ? 'bg-primary border-primary' : 'bg-surface border-border'}`}
-                    >
-                      <Text className={`font-bold ${selectedVariant?.id === v.id ? 'text-white' : 'text-text'}`}>{v.variant_name}</Text>
-                      <Text className={`text-xs mt-1 ${selectedVariant?.id === v.id ? 'text-white/80' : 'text-text-muted'}`}>+ Rp {v.price.toLocaleString('id-ID')}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Upload Zone */}
-                <Text className="font-bold text-text mb-3">Your Design</Text>
-                
-                {designFile ? (
-                  <View className="bg-success/5 border border-success/20 rounded-2xl p-4 flex-row items-center mb-6">
-                    <View className="w-12 h-12 bg-success/10 rounded-xl items-center justify-center mr-4">
-                      {designFile.mimeType?.includes('pdf') ? <File size={24} color="#10B981" /> : <Image source={{ uri: designFile.uri }} className="w-full h-full rounded-xl" />}
-                    </View>
-                    <View className="flex-1">
-                      <Text className="font-bold text-text" numberOfLines={1}>{designFile.name}</Text>
-                      <Text className="text-success font-bold text-xs mt-1">Ready to print ✓</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setDesignFile(null)} className="p-2">
-                      <Trash size={18} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View className="mb-6">
-                    <TouchableOpacity 
-                      onPress={handlePickFile}
-                      className="border-2 border-dashed border-border rounded-2xl p-6 items-center justify-center bg-surface mb-3"
-                    >
-                      <UploadCloud size={32} color="#94A3B8" className="mb-3" />
-                      <Text className="font-bold text-text mb-1">Tap to Upload Design</Text>
-                      <Text className="text-text-muted text-xs">PDF, AI, PSD, or High-res JPG (Max 10MB)</Text>
-                    </TouchableOpacity>
-
-                    <View className="flex-row items-center justify-between">
-                      <View className="flex-row items-center bg-warning/10 px-3 py-2 rounded-lg flex-1 mr-3">
-                        <Text className="text-warning text-[10px] font-bold">Ensure 300 DPI and correct bleed lines.</Text>
-                      </View>
-                      <TouchableOpacity onPress={() => setUploadLater(!uploadLater)} className={`px-4 py-2 rounded-lg border ${uploadLater ? 'bg-primary-light border-primary-light' : 'border-border'}`}>
-                        <Text className={`font-bold text-xs ${uploadLater ? 'text-white' : 'text-text-muted'}`}>Upload later</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )}
-
-              </Animated.View>
-            )}
-
-            {activeTab === 'specs' && (
-              <Animated.View entering={FadeIn}>
-                <View className="bg-surface rounded-2xl p-4 border border-border mb-4 flex-row items-center">
-                  <Clock size={20} color="#1E3A8A" />
-                  <View className="ml-3">
-                    <Text className="font-bold text-text text-sm">Turnaround Time</Text>
-                    <Text className="text-text-muted text-xs">{product.estimated_days} Business Days</Text>
-                  </View>
-                </View>
-              </Animated.View>
-            )}
-
-            {activeTab === 'reviews' && (
-              <Animated.View entering={FadeIn} className="items-center py-6">
-                <Text className="text-text-muted">No reviews yet for this product.</Text>
-              </Animated.View>
-            )}
+        {/* Quantity Section */}
+        <View className="px-4 py-5 bg-white mb-2">
+          <Text className="font-bold text-slate-800 text-base mb-3">Kuantitas</Text>
+          <View className="flex-row items-center border border-slate-200 rounded-xl self-start overflow-hidden">
+            <TouchableOpacity onPress={decrementQuantity} className="p-3 bg-slate-50 active:bg-slate-100">
+              <Minus size={20} color={quantity > 1 ? '#475569' : '#cbd5e1'} />
+            </TouchableOpacity>
+            <View className="px-6 py-2 border-x border-slate-200 bg-white">
+              <Text className="font-bold text-lg text-slate-800">{quantity}</Text>
+            </View>
+            <TouchableOpacity onPress={incrementQuantity} className="p-3 bg-slate-50 active:bg-slate-100">
+              <Plus size={20} color="#475569" />
+            </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Notes Section */}
+        <View className="px-4 py-5 bg-white mb-2">
+          <Text className="font-bold text-slate-800 text-base mb-3">Catatan (Opsional)</Text>
+          <TextInput
+            className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 min-h-[100px]"
+            placeholder="Ukuran custom, instruksi cetak, dll."
+            placeholderTextColor="#94a3b8"
+            multiline
+            textAlignVertical="top"
+            value={notes}
+            onChangeText={setNotes}
+            style={{ outlineStyle: 'none' } as any}
+          />
         </View>
       </ScrollView>
 
-      {/* Sticky Add to Cart Bar */}
-      <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-border px-6 pt-4 pb-8 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
-        {showAddedFlash && (
-          <Animated.View entering={SlideInDown} exiting={FadeOut} className="absolute -top-12 left-6 right-6 bg-success rounded-xl px-4 py-3 flex-row items-center justify-between shadow-lg">
-            <View className="flex-row items-center">
-              <CheckCircle2 size={18} color="white" />
-              <Text className="text-white font-bold ml-2">Added to Cart!</Text>
-            </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Cart')}>
-              <Text className="text-white font-black underline">View Cart</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        <View className="flex-row items-center mb-4">
-          <Text className="text-text-muted text-xs mr-2">Status:</Text>
-          {designFile ? (
-            <Text className="text-success font-bold text-xs">Ready ✓</Text>
-          ) : uploadLater ? (
-            <Text className="text-warning font-bold text-xs">Pending Upload</Text>
-          ) : (
-            <Text className="text-text-muted text-xs">No design attached · Required</Text>
-          )}
+      {/* Sticky Bottom Actions */}
+      <View className="absolute bottom-0 w-full bg-white border-t border-slate-100 px-4 py-4 pb-8 flex-row items-center justify-between">
+        <View className="flex-1">
+          <Text className="text-slate-500 text-xs mb-1">Subtotal</Text>
+          <Text className="text-blue-600 font-bold text-xl">{formatCurrency(subtotal)}</Text>
         </View>
-
-        <View className="flex-row items-center justify-between">
-          <View className="flex-row items-center bg-surface border border-border rounded-full">
-            <TouchableOpacity onPress={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-10 items-center justify-center">
-              <Text className="text-text text-lg font-bold">-</Text>
-            </TouchableOpacity>
-            <Text className="font-bold text-text w-6 text-center">{quantity}</Text>
-            <TouchableOpacity onPress={() => setQuantity(quantity + 1)} className="w-10 h-10 items-center justify-center">
-              <Text className="text-text text-lg font-bold">+</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Tombol aksi */}
-          <View style={{ flex: 1, marginLeft: 12, flexDirection: 'row', gap: 8 }}>
-            {/* Add to Cart */}
-            <TouchableOpacity
-              onPress={handleAddToCart}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 50, alignItems: 'center', borderWidth: 1.5, borderColor: '#0F172A' }}
-            >
-              {isCartLoading ? (
-                <ActivityIndicator color="#333" size="small" />
-              ) : (
-                <Text style={{ fontWeight: '700', fontSize: 13, color: '#0F172A' }}>+ Keranjang</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Beli Sekarang */}
-            <TouchableOpacity
-              onPress={handleBuyNow}
-              disabled={isBuyingNow}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 50, alignItems: 'center', backgroundColor: '#0F172A' }}
-            >
-              {isBuyingNow ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <Text style={{ fontWeight: '700', fontSize: 13, color: '#fff' }}>Beli Sekarang</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+        <View className="flex-row gap-2">
+          <TouchableOpacity
+            onPress={handleAddToCart}
+            className="bg-blue-50 border border-blue-200 p-3 rounded-xl justify-center items-center"
+          >
+            <ShoppingCart size={24} color="#2563eb" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleBuyNow}
+            className="bg-blue-600 px-6 py-3 rounded-xl justify-center items-center"
+          >
+            <Text className="text-white font-bold text-base">Beli Sekarang</Text>
+          </TouchableOpacity>
         </View>
-
       </View>
     </View>
   );

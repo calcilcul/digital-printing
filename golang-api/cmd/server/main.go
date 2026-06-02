@@ -109,7 +109,7 @@ func main() {
 	// CORS CONFIGURATION
 	// ========================
 	r.Use(cors.New(cors.Config{
-		AllowAllOrigins: true,
+		AllowOrigins:    []string{"http://localhost:8081", "http://localhost:8082", "http://localhost:3000", "http://127.0.0.1:8081"},
 		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:    []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
 		ExposeHeaders:   []string{"Content-Length"},
@@ -143,7 +143,7 @@ func main() {
 	// RUN SERVER
 	port := os.Getenv("APP_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8000"
 	}
 
 	log.Printf("🚀 OMS Printing Server berjalan di port: %s", port)

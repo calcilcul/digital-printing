@@ -85,11 +85,20 @@ func (h *DesignHandler) UploadDesign(c *gin.Context) {
 	}
 
 	// 🧪 Hubungkan ke Python AI untuk validasi blur jika filenya adalah gambar
-	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
+	// Hati-hati: HP Android/iOS sering mengirimkan file tanpa ekstensi atau dengan ekstensi berbeda (webp, heic)
+	// Kita akan periksa MIME typenya
+	contentType := file.Header.Get("Content-Type")
+	isImage := strings.HasPrefix(contentType, "image/") || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp"
+	
+	if isImage {
 		isSharp, aiErr := checkBlurWithAI(savePath)
 		if aiErr != nil {
-			// Hubungan ke AI terputus/off, fallback log dan izinkan agar tidak menghalangi testing lokal
-			fmt.Printf("[AI Warning] Gagal verifikasi blur via Python AI: %v. Fallback: diizinkan.\n", aiErr)
+			// Hubungan ke AI terputus/off atau error, WAJIB BLOCK
+			_ = os.Remove(savePath)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": fmt.Sprintf("Service AI sedang offline atau mengalami gangguan: %v. Harap nyalakan server python-ai.", aiErr),
+			})
+			return
 		} else if !isSharp {
 			// Gambar blur! Hapus file fisik lokal yang sudah terlanjur di-SaveUploadedFile
 			_ = os.Remove(savePath)

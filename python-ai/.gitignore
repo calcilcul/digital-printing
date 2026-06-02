@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+env/
+.env
+
+# AI Models (Usually too large for Git)
+*.h5
+*.tflite
+*.pb
+
+# IDEs
+.vscode/
+.idea/

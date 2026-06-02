@@ -29,6 +29,11 @@ digital-printing/
 │   ├── setup.sql        # Database schema
 │   └── go.mod
 │
+├── python-ai/           # 🧠 Python AI Microservice (FastAPI + TensorFlow)
+│   ├── main.py          # AI logic (MobileNetV2 + Laplacian Variance)
+│   ├── requirements.txt # Dependencies
+│   └── .env             # Konfigurasi
+│
 └── frontend/            # 🌐 Web Dashboard (React + Vite) — referensi porting
 ```
 
@@ -36,11 +41,28 @@ digital-printing/
 
 ## 🚀 Cara Menjalankan
 
+### Persiapan Prasyarat
+- **Node.js** (v18+) & **npm**
+- **Golang** (v1.20+)
+- **Python 3.12** (Penting: TensorFlow saat ini paling stabil di Python 3.12, jangan gunakan 3.13/3.14)
+- **PostgreSQL** (v15+)
+
+### AI Microservice (Python)
+```bash
+cd python-ai
+python -m venv venv
+.\venv\Scripts\activate   # Windows
+# source venv/bin/activate # Mac/Linux
+pip install -r requirements.txt
+python main.py
+# API berjalan di http://localhost:5000
+```
+
 ### Backend (Golang API)
 ```bash
 cd golang-api
-go run ./cmd/main.go
-# API berjalan di http://localhost:8080
+go run ./cmd/server/main.go
+# API berjalan di http://localhost:8000
 ```
 
 ### Mobile (Expo)
@@ -57,7 +79,8 @@ npx expo start
 | Layer | Teknologi |
 |---|---|
 | Mobile | React Native + Expo (TypeScript) |
-| Backend | Golang (Gin/Fiber) |
+| Backend | Golang (Gin Framework) |
+| AI Microservice | Python (FastAPI + TensorFlow) |
 | Database | PostgreSQL |
 | Auth | JWT |
 | HTTP Client | Axios + AsyncStorage |

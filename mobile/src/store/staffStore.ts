@@ -1,126 +1,69 @@
 import { create } from 'zustand';
-import { axiosClient } from '../api/axiosClient';
-
-export interface StaffOrderItem {
-  id: number;
-  product_id: number;
-  product_name: string;
-  variant_name: string;
-  quantity: number;
-  price: number;
-  sub_total: number;
-  image?: string;
-  design_file_id?: number;
-  design_file_path?: string;
-  design_version?: number;
-  design_status?: string;
-  design_notes?: string;
-}
+import { staffApi } from '../api/staffApi';
 
 export interface StaffOrder {
   id: number;
+  user_id: number;
   order_code: string;
   total_price: number;
   status: string;
   created_at: string;
-  user_name: string;
-  payment_id?: number;
+  items: any[];
   payment_proof_url?: string;
-  design_file_url?: string;
-  items?: StaffOrderItem[];
+  user?: {
+    name: string;
+    email: string;
+    phone: string;
+  };
+  customer_name?: string;
+  production_logs?: any[];
+  status_logs?: any[];
 }
 
 interface StaffState {
   orders: StaffOrder[];
+  pendingCount: number;
   isLoading: boolean;
+  error: string | null;
   fetchOrders: () => Promise<void>;
-  approvePayment: (orderId: number) => Promise<{ success: boolean; error?: string }>;
-  rejectPayment: (orderId: number, reason: string) => Promise<{ success: boolean; error?: string }>;
-  approveDesign: (orderId: number) => Promise<{ success: boolean; error?: string }>;
-  requestRevision: (orderId: number, notes: string) => Promise<{ success: boolean; error?: string }>;
-  startProduction: (orderId: number, notes?: string) => Promise<{ success: boolean; error?: string }>;
-  finishProduction: (orderId: number, notes?: string) => Promise<{ success: boolean; error?: string }>;
+  resetPendingCount: () => void;
+  incrementPendingCount: () => void;
 }
 
 export const useStaffStore = create<StaffState>((set, get) => ({
   orders: [],
+  pendingCount: 0,
   isLoading: false,
+  error: null,
 
   fetchOrders: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     try {
-      const res = await axiosClient.get('/api/staff/orders');
-      set({ orders: res.data.data || [], isLoading: false });
-    } catch (error) {
-      console.error("Gagal mengambil daftar pesanan staff", error);
-      set({ isLoading: false });
+      const response = await staffApi.getOrders();
+      const rawData = response.data;
+      
+      let orders: StaffOrder[] = [];
+      if (rawData?.data) {
+        orders = rawData.data;
+      } else if (Array.isArray(rawData)) {
+        orders = rawData;
+      }
+      
+      // Calculate pending count (from DB directly, but we can double check)
+      const pendingCount = orders.filter(
+        (o) => o.status === 'payment_verification' || o.status === 'design_review'
+      ).length;
+
+      set({ orders, pendingCount, isLoading: false });
+    } catch (error: any) {
+      console.error('Failed to fetch staff orders:', error);
+      set({ 
+        error: error?.response?.data?.message || 'Gagal memuat pesanan', 
+        isLoading: false 
+      });
     }
   },
 
-  approvePayment: async (orderId) => {
-    try {
-      await axiosClient.put(`/api/staff/orders/${orderId}/payment/approve`);
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal menyetujui pembayaran", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal menyetujui pembayaran' };
-    }
-  },
-
-  rejectPayment: async (orderId, reason) => {
-    try {
-      await axiosClient.put(`/api/staff/orders/${orderId}/payment/reject`, { reason });
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal menolak pembayaran", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal menolak pembayaran' };
-    }
-  },
-
-  approveDesign: async (orderId) => {
-    try {
-      await axiosClient.put(`/api/staff/orders/${orderId}/design/approve`);
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal menyetujui desain", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal menyetujui desain' };
-    }
-  },
-
-  requestRevision: async (orderId, notes) => {
-    try {
-      await axiosClient.put(`/api/staff/orders/${orderId}/design/revision`, { notes });
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal meminta revisi desain", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal meminta revisi desain' };
-    }
-  },
-
-  startProduction: async (orderId, notes = '') => {
-    try {
-      await axiosClient.put(`/api/staff/production/${orderId}/start`, { notes });
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal memulai produksi", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal memulai produksi' };
-    }
-  },
-
-  finishProduction: async (orderId, notes = '') => {
-    try {
-      // Use the redesigned finish route
-      await axiosClient.put(`/api/staff/orders/${orderId}/printing/finish`, { notes });
-      await get().fetchOrders();
-      return { success: true };
-    } catch (error: any) {
-      console.error("Gagal menyelesaikan produksi", error);
-      return { success: false, error: error.response?.data?.message || 'Gagal menyelesaikan produksi' };
-    }
-  },
+  resetPendingCount: () => set({ pendingCount: 0 }),
+  incrementPendingCount: () => set((state) => ({ pendingCount: state.pendingCount + 1 })),
 }));
