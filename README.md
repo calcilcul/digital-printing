@@ -1,6 +1,6 @@
 # 🖨️ Jaya Mandiri Digital Printing — Sistem Manajemen Terpadu
 
-Aplikasi platform terpadu untuk layanan digital printing, dibangun dengan arsitektur modern berbasis **React Native (Expo)**, **Golang REST API**, **PostgreSQL**, dan **Python AI Microservice**.
+Aplikasi platform terpadu untuk layanan digital printing, dibangun dengan arsitektur modern berbasis **Laravel (PHP)**, **Golang REST API**, **PostgreSQL**, dan **Python AI Microservice**.
 
 ![Version](https://img.shields.io/badge/version-v2.1.0-blue)
 ![Status](https://img.shields.io/badge/status-production_ready-success)
@@ -11,12 +11,13 @@ Aplikasi platform terpadu untuk layanan digital printing, dibangun dengan arsite
 
 ```
 digital-printing/
-├── mobile/              # 📱 Frontend React Native (Expo)
-│   ├── src/
-│   │   ├── screens/     # Halaman aplikasi (Customer, Staff, Admin)
-│   │   ├── store/       # State management global (Zustand)
-│   │   └── navigation/  # Role-based Stack & Tab navigators
-│   └── package.json
+├── frontend/            # 🌐 Web Frontend (Laravel)
+│   ├── app/
+│   │   ├── Http/Controllers/ # Kontroler aplikasi web
+│   │   └── Models/      # Model data frontend
+│   ├── resources/
+│   │   └── views/       # Blade templates & UI
+│   └── routes/          # web.php untuk routing
 │
 ├── golang-api/          # ⚙️ Backend Core REST API (Go + PostgreSQL)
 │   ├── internal/        # Arsitektur Clean (Handler, Usecase, Repository)
@@ -78,12 +79,13 @@ python main.py
 # API berjalan di http://localhost:5000
 ```
 
-### 4. Jalankan Aplikasi Mobile (Expo)
+### 4. Jalankan Aplikasi Web (Laravel)
 ```bash
-cd mobile
-npm install
-npx expo start
-# Buka di Emulator Android / Web (tekan 'w') / App Expo Go di HP
+cd frontend
+composer install
+npm install && npm run dev
+php artisan serve
+# Buka di browser http://localhost:8000
 ```
 
 ---

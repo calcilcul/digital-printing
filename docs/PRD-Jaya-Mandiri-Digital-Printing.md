@@ -46,7 +46,7 @@
 
 ## 1. Ringkasan Eksekutif
 
-**Jaya Mandiri Digital Printing Management System** adalah platform manajemen percetakan digital berbasis **mobile-first** yang dibangun untuk mengotomasi dan mendigitalisasi seluruh alur operasional bisnis percetakan — mulai dari penerimaan pesanan, verifikasi pembayaran, review desain, proses produksi, hingga penyelesaian dan pelaporan bisnis.
+**Jaya Mandiri Digital Printing Management System** adalah platform manajemen percetakan digital berbasis **web** yang dibangun untuk mengotomasi dan mendigitalisasi seluruh alur operasional bisnis percetakan — mulai dari penerimaan pesanan, verifikasi pembayaran, review desain, proses produksi, hingga penyelesaian dan pelaporan bisnis.
 
 Platform ini menggantikan alur manual (via WhatsApp, kertas bon, dan pencatatan manual) dengan sistem terpadu yang real-time, transparan, dan terukur.
 
@@ -54,12 +54,11 @@ Platform ini menggantikan alur manual (via WhatsApp, kertas bon, dan pencatatan 
 
 | Layer | Teknologi | Peran |
 |-------|-----------|-------|
-| **Mobile Client** | Expo React Native (TypeScript) + NativeWind | Aplikasi mobile iOS & Android untuk Customer, Staff, dan Owner |
+| **Web Frontend** | Laravel (PHP) + Blade / TailwindCSS | Aplikasi web responsif untuk Customer, Staff, dan Owner |
 | **Backend API** | Golang (Gin Framework) | REST API utama, logika bisnis, JWT Auth, WebSocket |
 | **AI Microservice** | Python (FastAPI + TensorFlow/MobileNetV2) | Deteksi kualitas gambar (Blur Detection) dengan Ensemble Method |
 | **Database** | PostgreSQL 15 | Penyimpanan data persisten dengan ENUM types |
-| **State Management** | Zustand | Client-side state management di mobile |
-| **HTTP Client** | Axios + React Query | API fetching & caching di mobile |
+| **HTTP Client** | Guzzle HTTP / Axios | Komunikasi API dari Web ke Backend Golang |
 
 ---
 
@@ -160,7 +159,7 @@ Bisnis percetakan digital seperti **Jaya Mandiri** umumnya masih beroperasi seca
 Nama        : Rika Amelia
 Usia        : 28 tahun
 Pekerjaan   : Pemilik usaha katering kecil
-Perangkat   : Smartphone Android (mid-range)
+Perangkat   : PC/Laptop atau Web Browser
 ```
 
 **Kebutuhan:**
@@ -185,7 +184,7 @@ Rika membuka aplikasi, memilih produk "Banner Glossy", upload desain logo usahan
 Nama        : Budi Santoso
 Usia        : 32 tahun
 Pekerjaan   : Operator mesin cetak di Jaya Mandiri
-Perangkat   : Smartphone Android
+Perangkat   : PC/Laptop atau Web Browser
 ```
 
 **Kebutuhan:**
@@ -207,7 +206,7 @@ Perangkat   : Smartphone Android
 Nama        : Hendra Wijaya
 Usia        : 45 tahun
 Pekerjaan   : Pemilik & Manajer Jaya Mandiri
-Perangkat   : Smartphone Android + Tablet
+Perangkat   : PC/Laptop atau Web Browser
 ```
 
 **Kebutuhan:**
@@ -227,10 +226,10 @@ Perangkat   : Smartphone Android + Tablet
 ┌─────────────────────────────────────────────────────────────┐
 │                    CLIENT LAYER                              │
 │   ┌─────────────────────────────────────────────────────┐   │
-│   │   Expo React Native (TypeScript)                    │   │
-│   │   ├── Customer App (Tab: Home, Shop, Cart, Profile) │   │
-│   │   ├── Staff App (Dashboard, Orders, Production)     │   │
-│   │   └── Owner/Manager App (Dashboard, Reports)        │   │
+│   │   Laravel Web Application                           │   │
+│   │   ├── Customer Portal (Home, Shop, Cart, Profile)   │   │
+│   │   ├── Staff Portal (Dashboard, Orders, Production)  │   │
+│   │   └── Owner Dashboard (Reports, Management)         │   │
 │   └─────────────────────────────────────────────────────┘   │
 └───────────────────────┬─────────────────────────────────────┘
                         │ HTTPS / WebSocket (ws://)
@@ -276,16 +275,13 @@ Backend Golang menggunakan **Clean Architecture** dengan 4 layer:
 | **Repository** | `internal/repository/` | Database queries, data access |
 | **Domain** | `internal/domain/` | Entity models, interface contracts |
 
-### 6.3 State Management Mobile
+### 6.3 State Management Web
 
 ```
-Zustand Stores:
-├── authStore.ts    — User session, JWT token, role
-├── cartStore.ts    — Cart items, total price
-├── orderStore.ts   — Order list, order detail
-├── productStore.ts — Product catalog
-├── staffStore.ts   — Staff dashboard data
-└── adminStore.ts   — Admin/Owner dashboard data
+Laravel Frontend:
+├── Blade Templates — Render UI server-side
+├── Alpine.js       — Interaktivitas client-side ringan
+└── TailwindCSS     — Styling komponen UI responsif
 ```
 
 ---
@@ -944,7 +940,7 @@ Semua aksi penting dicatat di `audit_logs`:
 
 ### 14.1 Asumsi
 
-- Customer memiliki smartphone dengan koneksi internet yang memadai
+- Customer memiliki perangkat dengan web browser modern dan koneksi internet memadai
 - Staff memiliki akun yang dibuat oleh Owner
 - Gambar desain yang diupload dalam format JPG atau PNG
 - Pembayaran dilakukan via transfer bank atau QRIS secara manual
@@ -982,9 +978,9 @@ Semua aksi penting dicatat di `audit_logs`:
 | M1: Backend API (Auth, Product, Cart, Order) | April 2026 | ✅ Selesai |
 | M2: Backend API (Design, Payment, Production, Material) | April 2026 | ✅ Selesai |
 | M3: Python AI Service (Blur Detection Model) | April 2026 | ✅ Selesai |
-| M4: Mobile App — Customer Flow (Login, Catalog, Cart, Order, Design, Payment) | Mei 2026 | 🔄 In Progress |
-| M5: Mobile App — Staff Flow (Dashboard, Design Review, Payment Verification, Production) | Mei 2026 | 🔄 In Progress |
-| M6: Mobile App — Owner Flow (Dashboard, Reports, Material, User Management) | Mei 2026 | 🔄 In Progress |
+| M4: Web App - Customer Flow (Login, Catalog, Cart, Order, Design, Payment) | Mei 2026 | 🟡 In Progress |
+| M5: Web App - Staff Flow (Dashboard, Design Review, Payment Verification, Production) | Mei 2026 | 🟡 In Progress |
+| M6: Web App - Owner Flow (Dashboard, Reports, Material, User Management) | Mei 2026 | 🟡 In Progress |
 | M7: WebSocket Integration & Real-time Notification | Mei 2026 | 🔄 In Progress |
 | M8: Testing & QA | Juni 2026 | ⏳ Planned |
 | M9: Deploy Production | Juni 2026 | ⏳ Planned |
@@ -998,8 +994,8 @@ Semua aksi penting dicatat di `audit_logs`:
 | **Product Manager / Owner** | Visi produk, prioritas fitur, approval PRD |
 | **Backend Engineer (Go)** | REST API Golang, database schema, JWT, WebSocket, cron job |
 | **AI Engineer (Python)** | Model training MobileNetV2, FastAPI service, ensemble logic |
-| **Mobile Engineer (Expo)** | React Native screens, navigation, Zustand stores, API integration |
-| **Database Admin** | Schema design, indeks, migrasi, seed data |
+| **Web Engineer (Laravel)** | Blade views, Alpine.js, TailwindCSS, API integration |
+| **Database Admin** | Schema design, optimization, indexing, migrasi, seed data |
 | **QA Engineer** | Test scenarios, API testing (Postman), end-to-end testing |
 
 ---
@@ -1038,12 +1034,12 @@ Semua aksi penting dicatat di `audit_logs`:
 
 **Opsi A — Via psql CLI:**
 ```bash
-psql -U postgres -c "CREATE DATABASE printing_mobile;"
-psql -U postgres -d printing_mobile -f golang-api/setup.sql
+psql -U postgres -c "CREATE DATABASE printing_db;"
+psql -U postgres -d printing_db -f golang-api/setup.sql
 ```
 
 **Opsi B — Via pgAdmin (GUI):**
-1. Buat database baru bernama `printing_mobile`
+1. Buat database baru bernama `printing_db`
 2. Buka **Query Tool** → paste isi file `golang-api/setup.sql` → Execute
 
 > [!IMPORTANT]
@@ -1073,7 +1069,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
 DB_PASS=your_postgres_password
-DB_NAME=printing_mobile
+DB_NAME=printing_db
 JWT_SECRET=your_secret_key_minimum_32_characters_here
 AI_SERVICE_URL=http://localhost:5000
 ```
@@ -1086,7 +1082,7 @@ APP_HOST=0.0.0.0
 ```
 
 ```env
-# mobile/.env
+# frontend/.env
 API_URL=http://10.0.2.2:8080   # Android Emulator
 # API_URL=http://localhost:8080  # iOS Simulator / Web
 ```
@@ -1147,10 +1143,10 @@ API_URL=http://10.0.2.2:8080   # Android Emulator
 | Peran | Nama | Status | Tanggal |
 |-------|------|--------|---------|
 | **Product Manager / Owner** | Hendra Wijaya | ✅ Approved | 28 Mei 2026 |
-| **Backend Engineer (Go)** | *(nama engineer)* | ✅ Approved | 28 Mei 2026 |
-| **AI Engineer (Python)** | *(nama engineer)* | ✅ Approved | 28 Mei 2026 |
-| **Mobile Engineer (Expo)** | *(nama engineer)* | ✅ Approved | 28 Mei 2026 |
-| **Database Admin** | *(nama DBA)* | ✅ Approved | 28 Mei 2026 |
+| **Backend Engineer (Go)** | *(nama engineer)* | 🟢 Approved | 28 Mei 2026 |
+| **AI Engineer (Python)** | *(nama engineer)* | 🟢 Approved | 28 Mei 2026 |
+| **Web Engineer (Laravel)** | *(nama engineer)* | 🟢 Approved | 28 Mei 2026 |
+| **Database Admin** | *(nama DBA)* | 🟢 Approved | 28 Mei 2026 |
 | **QA Engineer** | *(nama QA)* | ✅ Approved | 28 Mei 2026 |
 
 ### 21.2 Referensi Dokumen Terkait
@@ -1160,8 +1156,8 @@ API_URL=http://10.0.2.2:8080   # Android Emulator
 | Database Schema | `golang-api/setup.sql` | Skema lengkap + seed data PostgreSQL |
 | API Routes | `golang-api/internal/delivery/http/routes/routes.go` | Definisi semua endpoint |
 | AI Service | `python-ai/main.py` | Implementasi blur detection |
-| Mobile Navigation | `mobile/src/navigation/` | Struktur navigasi app |
-| Mobile Stores | `mobile/src/store/` | State management (Zustand) |
+| Web Navigation | `routes/web.php` | Struktur routing web |
+| Web Controllers | `app/Http/Controllers/` | Controller Laravel |
 
 ---
 
